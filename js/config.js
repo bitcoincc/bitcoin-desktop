@@ -59,6 +59,9 @@ export const DEFAULTS = {
   // Solid server (JSS)
   serveBlocks: false,   // serve blocks locally via JSS
   serverPort: 8443,     // JSS port
+
+  // Transaction pool (filtered mempool)
+  txpoolEnabled: false, // listen for unconfirmed txs via P2P
   peers: [],            // remote JSS peers e.g. ['192.168.0.157:8443']
 
   // R2 configuration (for contribution)

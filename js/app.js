@@ -10,6 +10,7 @@ import { Storage } from './storage.js'
 import { DEFAULTS, mergeConfig, computeScore } from './config.js'
 import { BlockUploader } from './uploader.js'
 import { Scanner } from './scanner.js'
+import { TxPool } from './txpool.js'
 import { MerkleVerifier } from './merkle.js'
 import localSource from './sources/local.js'
 import jssSource from './sources/jss.js'
@@ -32,6 +33,8 @@ export class BitcoinDesktop extends EventTarget {
     this.uploader = new BlockUploader(chain)
     this.uploader.enabled = this.config.contributeBlocks || false
     this.scanner = new Scanner(chain)
+    this.txpool = new TxPool(chain)
+    this.txpool.enabled = this.config.txpoolEnabled || false
     this.merkle = null // initialized after hasher ready
     this.merkleStats = { checked: 0, passed: 0, failed: 0 }
     this.sockets = {}
@@ -415,6 +418,18 @@ export class BitcoinDesktop extends EventTarget {
     this.scanner.setStorage(this.storage)
     this.scanner.load().catch(() => {})
     this.scanner.watch(address, scriptPubkeyHex)
+
+    // TxPool — filtered mempool
+    this.txpool.watch(address, scriptPubkeyHex)
+    if (this.txpool.enabled) {
+      this.txpool.addEventListener('tx', (e) => {
+        this.dispatchEvent(new CustomEvent('wallet-mempool-tx', { detail: e.detail }))
+      })
+      this.txpool.addEventListener('confirmed', (e) => {
+        this.dispatchEvent(new CustomEvent('wallet-tx-confirmed', { detail: e.detail }))
+      })
+      this.txpool.start().catch(err => console.log('[txpool] start failed:', err.message))
+    }
 
     // Forward scanner events
     this.scanner.addEventListener('transactions', (e) => {

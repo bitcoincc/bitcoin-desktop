@@ -636,6 +636,31 @@ export default {
             balanceEl.style.color = '#f7931a'
             balanceLabel.textContent = bal.unconfirmed ? 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)' : 'sats'
           })
+
+          // TxPool — instant unconfirmed tx notification
+          btc.app.addEventListener('wallet-mempool-tx', (e) => {
+            const tx = e.detail
+            const total = tx.outputs.reduce((s, o) => s + o.value, 0)
+            const line = document.createElement('div')
+            line.style.cssText = 'font-size:0.85rem;padding:0.5rem 0;border-bottom:1px solid #eee;'
+            line.innerHTML = '<span style="color:#f7931a;font-weight:600;">+' + total.toLocaleString() + ' sats</span> <span style="color:#888;">unconfirmed</span>'
+            historyEmpty.style.display = 'none'
+            historyEl.prepend(line)
+
+            // Update balance
+            const currentBal = parseInt(balanceEl.textContent.replace(/,/g, '')) || 0
+            balanceEl.textContent = (currentBal + total).toLocaleString()
+            balanceLabel.textContent = 'sats (' + total.toLocaleString() + ' unconfirmed)'
+          })
+
+          btc.app.addEventListener('wallet-tx-confirmed', (e) => {
+            const tx = e.detail
+            const total = tx.outputs.reduce((s, o) => s + o.value, 0)
+            const line = document.createElement('div')
+            line.style.cssText = 'font-size:0.85rem;padding:0.5rem 0;border-bottom:1px solid #eee;'
+            line.innerHTML = '<span style="color:#2d8a4e;font-weight:600;">+' + total.toLocaleString() + ' sats</span> <span style="color:#888;">confirmed</span>'
+            historyEl.prepend(line)
+          })
         }
 
         // Actions
