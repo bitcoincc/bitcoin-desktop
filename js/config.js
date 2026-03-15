@@ -43,6 +43,13 @@ export const DEFAULTS = {
     tbtc4: 0,          // testnet4: fetch everything (small chain)
   },
 
+  // AssumeValid — skip script validation for blocks older than this window
+  // Blocks within window get full T-class verification
+  assumeValidWindow: {
+    btc: 4320,         // ~1 month of blocks (rolling)
+    tbtc4: 0,          // validate everything (small chain)
+  },
+
   // Bootstrap
   bootstrapBlocks: 12, // fetch last 12 blocks on startup (matches NIP-333 batch)
 
