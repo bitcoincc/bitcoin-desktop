@@ -118,7 +118,7 @@
 
       const p1 = createPhase('1. Download Headers')
       const p2 = createPhase('2. Verify Chain')
-      const p3 = createPhase('3. Connect Electrum')
+      const p3 = createPhase('3. Nostr Live (NIP-333)')
       phasesEl.appendChild(p1)
       phasesEl.appendChild(p2)
       phasesEl.appendChild(p3)
@@ -157,9 +157,12 @@
             <div><div class="stat-value">${chain}</div><div class="stat-label">Chain</div></div>
           `
         }
-        if (d.phase === 'electrum' && d.status === 'connecting') {
+        if (d.phase === 'nostr' && d.status === 'connecting') {
           p3.querySelector('.phase-badge').textContent = 'Connecting...'
           p3.querySelector('.phase-badge').className = 'phase-badge badge-running'
+        }
+        if (d.phase === 'live') {
+          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
         }
         if (d.phase === 'ready') {
           p3.querySelector('.phase-badge').textContent = '\u2713 Live'
@@ -180,6 +183,16 @@
           resultEl.textContent = '\u2717 Error: ' + d.error
           startBtn.textContent = 'Retry'
           startBtn.disabled = false
+        }
+      })
+
+      app.addEventListener('relay', (e) => {
+        p3.querySelector('.phase-detail').textContent = e.detail.count + '/' + e.detail.total + ' relays connected'
+        if (e.detail.count > 0) {
+          p3.querySelector('.phase-badge').textContent = '\u2713 Live'
+          p3.querySelector('.phase-badge').className = 'phase-badge badge-done'
+          p3.querySelector('.bar-fill').style.width = '100%'
+          p3.querySelector('.bar-fill').style.background = '#2d8a4e'
         }
       })
 

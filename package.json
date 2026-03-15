@@ -5,7 +5,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron . --no-sandbox",
     "dev": "electron . --dev",
     "web": "npx serve ."
   },
@@ -13,5 +13,8 @@
     "type": "git",
     "url": "https://github.com/bitcoincc/bitcoin-desktop"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^41.0.2"
+  }
 }

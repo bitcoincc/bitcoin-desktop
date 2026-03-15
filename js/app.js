@@ -4,16 +4,25 @@
  * Orchestrates header sync, Electrum connection, and verification
  */
 
-import { ElectrumClient } from './electrum.js'
 import { HeaderStore } from './headers.js'
+
+const NOSTR_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.net',
+  'wss://relay.primal.net',
+]
+const NOSTR_KIND = 33333
+const NOSTR_PUBKEY = 'cccccccc829b802b7bf52d43edf7cfe62ac89f332a318b6826ac8bd6e73660da'
 
 export class BitcoinDesktop extends EventTarget {
   constructor(chain = 'btc') {
     super()
     this.chain = chain
     this.headers = new HeaderStore(chain)
-    this.electrum = new ElectrumClient(chain)
-    this.status = 'idle' // idle, syncing, verifying, ready, error
+    this.sockets = {}
+    this.nostrTip = 0
+    this.status = 'idle'
   }
 
   async start(onProgress) {
@@ -42,25 +51,80 @@ export class BitcoinDesktop extends EventTarget {
         detail: { phase: 'verify', status: 'done', ...result }
       }))
 
-      // Phase 3: Connect to Electrum for live updates
-      this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'electrum', status: 'connecting' } }))
+      // Phase 3: Connect to Nostr for live headers (NIP-333)
+      this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'nostr', status: 'connecting' } }))
 
-      this.electrum.addEventListener('header', (e) => {
-        const header = e.detail
-        if (header.height > this.headers.height) {
+      let connected = 0
+      for (const url of NOSTR_RELAYS) {
+        const ws = new WebSocket(url)
+        this.sockets[url] = ws
+
+        ws.onopen = () => {
+          connected++
+          this.dispatchEvent(new CustomEvent('relay', { detail: { url, status: 'connected', count: connected, total: NOSTR_RELAYS.length } }))
+          ws.send(JSON.stringify([
+            'REQ', 'headers',
+            { kinds: [NOSTR_KIND], authors: [NOSTR_PUBKEY], '#d': ['latest'], '#n': [this.chain], limit: 1 }
+          ]))
+        }
+
+        ws.onmessage = async (e) => {
           try {
-            this.headers.appendHeader(header.hex)
-            this.dispatchEvent(new CustomEvent('newblock', {
-              detail: { height: this.headers.height, hash: this.headers.tipHash }
+            const msg = JSON.parse(e.data)
+            if (msg[0] !== 'EVENT' || msg[2]?.kind !== NOSTR_KIND) return
+
+            const event = msg[2]
+            const tags = Object.fromEntries(event.tags)
+            const tipHeight = parseInt(tags.tip, 10)
+            if (tipHeight <= this.nostrTip) return
+            this.nostrTip = tipHeight
+
+            // Parse headers from event
+            const count = event.content.length / 160
+            const startHeight = tipHeight - count + 1
+
+            // Try to append new headers
+            await this.headers.initHasher()
+            let appended = 0
+            for (let i = 0; i < count; i++) {
+              const height = startHeight + i
+              if (height <= this.headers.height) continue
+              if (height !== this.headers.height + 1) break // gap
+              const hex = event.content.slice(i * 160, (i + 1) * 160)
+              try {
+                this.headers.appendHeader(hex)
+                appended++
+              } catch { break }
+            }
+
+            if (appended > 0) {
+              this.dispatchEvent(new CustomEvent('newblock', {
+                detail: { height: this.headers.height, hash: this.headers.tipHash }
+              }))
+            }
+
+            this.dispatchEvent(new CustomEvent('status', {
+              detail: { phase: 'live', height: tipHeight, hash: this.headers.tipHash }
             }))
           } catch (err) {
-            console.error('Failed to append header:', err.message)
+            console.error('Nostr parse error:', err)
           }
         }
-      })
 
-      await this.electrum.connect()
-      await this.electrum.call('blockchain.headers.subscribe', [])
+        ws.onclose = () => {
+          connected = Math.max(0, connected - 1)
+          // Reconnect
+          setTimeout(() => {
+            if (this.sockets[url]) {
+              const newWs = new WebSocket(url)
+              newWs.onopen = ws.onopen
+              newWs.onmessage = ws.onmessage
+              newWs.onclose = ws.onclose
+              this.sockets[url] = newWs
+            }
+          }, 5000)
+        }
+      }
 
       this.status = 'ready'
       this.dispatchEvent(new CustomEvent('status', {
