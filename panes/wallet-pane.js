@@ -27,6 +27,7 @@ export default {
       .wallet-btn.secondary:hover { border-color: #f7931a; color: #f7931a; }
       .wallet-info { font-size: 0.8rem; color: #888; margin: 0.5rem 0; }
       .wallet-path { font-family: monospace; font-size: 0.75rem; color: #888; }
+      .wallet-btn:disabled { background: #ccc; cursor: not-allowed; }
     `
     container.appendChild(style)
 
@@ -48,16 +49,21 @@ export default {
     let mnemonic = null
     let address = null
     let privateKey = null
+    let crypto = {} // holds schnorr, secp256k1, sha256, bech32m
 
     // Check for existing wallet
     const btc = window._btc || {}
     const chain = btc.chain || 'btc'
 
     async function loadOrCreateWallet() {
-      const { schnorr } = await import('https://esm.sh/@noble/curves@1.8.2/secp256k1')
+      const curves = await import('https://esm.sh/@noble/curves@1.8.2/secp256k1')
+      const hashes = await import('https://esm.sh/@noble/hashes@1.7.2/sha256')
       const { generateMnemonic, mnemonicToSeedSync } = await import('https://esm.sh/@scure/bip39@1.5.4')
       const { HDKey } = await import('https://esm.sh/@scure/bip32@1.6.2')
       const { bech32m } = await import('https://esm.sh/@scure/base@1.2.4')
+      const { schnorr, secp256k1 } = curves
+      const { sha256 } = hashes
+      crypto = { schnorr, secp256k1, sha256, bech32m }
 
       // Try to load existing
       let walletData = null
@@ -135,6 +141,161 @@ export default {
       }
     }
 
+    // Helpers for tx building
+    function hexToBytes(hex) {
+      const b = new Uint8Array(hex.length / 2)
+      for (let i = 0; i < hex.length; i += 2) b[i / 2] = parseInt(hex.substr(i, 2), 16)
+      return b
+    }
+    function bytesToHex(b) {
+      return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('')
+    }
+    function numberToLE(n, len) {
+      const b = new Uint8Array(len)
+      for (let i = 0; i < len; i++) { b[i] = Number(n & 0xffn); n >>= 8n }
+      return b
+    }
+    function bigintToLE(n, len) {
+      return numberToLE(BigInt(n), len)
+    }
+    function varInt(n) {
+      if (n < 0xfd) return new Uint8Array([n])
+      if (n <= 0xffff) return new Uint8Array([0xfd, n & 0xff, n >> 8])
+      return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff])
+    }
+    function taggedHash(tag, data) {
+      const tagHash = crypto.sha256(new TextEncoder().encode(tag))
+      return crypto.sha256(new Uint8Array([...tagHash, ...tagHash, ...data]))
+    }
+    function concat(...arrays) {
+      const len = arrays.reduce((s, a) => s + a.length, 0)
+      const r = new Uint8Array(len)
+      let off = 0
+      for (const a of arrays) { r.set(a, off); off += a.length }
+      return r
+    }
+
+    function tweakPrivateKey(privKey) {
+      const pubKey = crypto.secp256k1.getPublicKey(privKey, true)
+      const xOnly = pubKey.slice(1)
+      let pk = new Uint8Array(privKey)
+      if (pubKey[0] === 0x03) {
+        const n = crypto.secp256k1.CURVE.n
+        const neg = n - BigInt('0x' + bytesToHex(privKey))
+        pk = hexToBytes(neg.toString(16).padStart(64, '0'))
+      }
+      const tweak = taggedHash('TapTweak', xOnly)
+      const tweaked = (BigInt('0x' + bytesToHex(pk)) + BigInt('0x' + bytesToHex(tweak))) % crypto.secp256k1.CURVE.n
+      return hexToBytes(tweaked.toString(16).padStart(64, '0'))
+    }
+
+    function getTweakedPubKey() {
+      const tweakedPriv = tweakPrivateKey(privateKey)
+      return crypto.schnorr.getPublicKey(tweakedPriv)
+    }
+
+    function createOutputScript(addr) {
+      const { bech32m } = crypto
+      const decoded = bech32m.decode(addr)
+      const witnessVer = decoded.words[0]
+      const program = bech32m.fromWords(decoded.words.slice(1))
+      return new Uint8Array([0x51, 0x20, ...program]) // OP_1 PUSH32
+    }
+
+    async function fetchUtxos() {
+      const api = chain === 'btc' ? 'https://mempool.space/api' : 'https://mempool.space/testnet4/api'
+      const res = await fetch(`${api}/address/${address}/utxo`)
+      if (!res.ok) throw new Error('Failed to fetch UTXOs')
+      return res.json()
+    }
+
+    async function buildAndSignTx(toAddress, amountSats, feeRate) {
+      const utxos = await fetchUtxos()
+      if (utxos.length === 0) throw new Error('No UTXOs available')
+
+      const tweakedPubKey = getTweakedPubKey()
+      const targetAmount = BigInt(amountSats)
+      const sorted = [...utxos].sort((a, b) => b.value - a.value)
+
+      const selected = []
+      let totalInput = 0n
+      for (const utxo of sorted) {
+        selected.push(utxo)
+        totalInput += BigInt(utxo.value)
+        const estVbytes = 111 + (selected.length - 1) * 58
+        if (totalInput >= targetAmount + BigInt(estVbytes * feeRate)) break
+      }
+
+      const vbytes = Math.ceil(10.5 + selected.length * 57.5 + 2 * 43)
+      const fee = BigInt(vbytes * feeRate)
+      const change = totalInput - targetAmount - fee
+      if (change < 0n) throw new Error('Insufficient funds (need ' + (targetAmount + fee) + ' sats, have ' + totalInput + ')')
+
+      const outputs = [{ address: toAddress, value: targetAmount }]
+      if (change >= 330n) outputs.push({ address, value: change })
+
+      // Build inputs
+      const inputs = selected.map(utxo => ({
+        txid: hexToBytes(utxo.txid).reverse(),
+        vout: bigintToLE(utxo.vout, 4),
+        sequence: new Uint8Array([0xfd, 0xff, 0xff, 0xff]),
+        value: BigInt(utxo.value),
+      }))
+
+      // Build outputs
+      const outputsData = outputs.map(out => ({
+        value: bigintToLE(out.value, 8),
+        script: createOutputScript(out.address),
+      }))
+
+      // Sighash precomputed values
+      const prevoutScript = new Uint8Array([0x51, 0x20, ...tweakedPubKey])
+      const version = bigintToLE(2, 4)
+      const locktime = bigintToLE(0, 4)
+
+      const hashPrevouts = crypto.sha256(concat(...inputs.map(i => concat(i.txid, i.vout))))
+      const hashAmounts = crypto.sha256(concat(...inputs.map(i => bigintToLE(i.value, 8))))
+      const hashScriptPubkeys = crypto.sha256(concat(...inputs.map(() => concat(new Uint8Array([prevoutScript.length]), prevoutScript))))
+      const hashSequences = crypto.sha256(concat(...inputs.map(i => i.sequence)))
+      const hashOutputs = crypto.sha256(concat(...outputsData.map(o => concat(o.value, new Uint8Array([o.script.length]), o.script))))
+
+      // Sign each input
+      const tweakedPriv = tweakPrivateKey(privateKey)
+      const witnesses = []
+      for (let i = 0; i < inputs.length; i++) {
+        const sigMsg = concat(
+          new Uint8Array([0x00, 0x00]), // epoch, sighash type
+          version, locktime,
+          hashPrevouts, hashAmounts, hashScriptPubkeys, hashSequences, hashOutputs,
+          new Uint8Array([0x00]), // spend type
+          bigintToLE(i, 4), // input index
+        )
+        const sighash = taggedHash('TapSighash', sigMsg)
+        const sig = crypto.schnorr.sign(sighash, tweakedPriv)
+        witnesses.push(sig)
+      }
+
+      // Serialize transaction
+      const marker = new Uint8Array([0x00])
+      const flag = new Uint8Array([0x01])
+      const parts = [version, marker, flag, varInt(inputs.length)]
+      for (const inp of inputs) parts.push(inp.txid, inp.vout, new Uint8Array([0x00]), inp.sequence)
+      parts.push(varInt(outputsData.length))
+      for (const out of outputsData) parts.push(out.value, new Uint8Array([out.script.length]), out.script)
+      for (const sig of witnesses) parts.push(new Uint8Array([0x01]), varInt(sig.length), sig)
+      parts.push(locktime)
+
+      const tx = concat(...parts)
+      return { hex: bytesToHex(tx), fee: Number(fee), total: Number(totalInput), amount: amountSats }
+    }
+
+    async function broadcastTx(txHex) {
+      const api = chain === 'btc' ? 'https://mempool.space/api' : 'https://mempool.space/testnet4/api'
+      const res = await fetch(`${api}/tx`, { method: 'POST', body: txHex })
+      if (!res.ok) throw new Error(await res.text())
+      return res.text()
+    }
+
     // Build UI
     async function init() {
       pane.innerHTML = ''
@@ -205,6 +366,83 @@ export default {
         receiveCard.appendChild(pathEl)
 
         pane.appendChild(receiveCard)
+
+        // Send card
+        const sendCard = document.createElement('div')
+        sendCard.className = 'wallet-card'
+        sendCard.innerHTML = '<h3>Send</h3>'
+
+        const sendForm = document.createElement('div')
+        sendForm.innerHTML = `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.8rem;color:#888;margin-bottom:0.25rem;">To address</div>
+            <input type="text" id="sendTo" placeholder="bc1p... or tb1p..." style="width:100%;font-family:monospace;font-size:0.8rem;padding:0.4rem 0.6rem;border:1px solid #ddd;border-radius:4px;">
+          </div>
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.8rem;color:#888;margin-bottom:0.25rem;">Amount (sats)</div>
+            <input type="number" id="sendAmount" placeholder="1000" min="330" style="width:100%;padding:0.4rem 0.6rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;">
+          </div>
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.8rem;color:#888;margin-bottom:0.25rem;">Fee rate (sat/vB)</div>
+            <input type="number" id="sendFeeRate" value="2" min="1" style="width:80px;padding:0.4rem 0.6rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;">
+          </div>
+        `
+        sendCard.appendChild(sendForm)
+
+        const sendBtn = document.createElement('button')
+        sendBtn.className = 'wallet-btn'
+        sendBtn.textContent = 'Send'
+        sendCard.appendChild(sendBtn)
+
+        const sendStatus = document.createElement('div')
+        sendStatus.style.cssText = 'margin-top:0.75rem;font-size:0.85rem;'
+        sendCard.appendChild(sendStatus)
+
+        sendBtn.addEventListener('click', async () => {
+          const to = pane.querySelector('#sendTo').value.trim()
+          const amount = parseInt(pane.querySelector('#sendAmount').value)
+          const feeRate = parseInt(pane.querySelector('#sendFeeRate').value) || 2
+
+          if (!to || !amount || amount < 330) {
+            sendStatus.textContent = 'Enter a valid address and amount (min 330 sats)'
+            sendStatus.style.color = '#c0392b'
+            return
+          }
+
+          sendBtn.disabled = true
+          sendBtn.textContent = 'Building tx...'
+          sendStatus.textContent = ''
+
+          try {
+            const tx = await buildAndSignTx(to, amount, feeRate)
+            sendStatus.innerHTML = 'Fee: ' + tx.fee + ' sats<br>'
+            sendBtn.textContent = 'Broadcast'
+            sendBtn.disabled = false
+
+            // Replace click to broadcast
+            sendBtn.onclick = async () => {
+              sendBtn.disabled = true
+              sendBtn.textContent = 'Broadcasting...'
+              try {
+                const txid = await broadcastTx(tx.hex)
+                sendStatus.innerHTML = '<span style="color:#2d8a4e">\u2713 Sent!</span><br><span style="font-family:monospace;font-size:0.75rem;word-break:break-all;">' + txid + '</span>'
+                sendBtn.textContent = 'Send'
+                sendBtn.disabled = false
+                sendBtn.onclick = null // reset
+              } catch (err) {
+                sendStatus.innerHTML = '<span style="color:#c0392b">\u2717 ' + err.message + '</span>'
+                sendBtn.textContent = 'Retry Broadcast'
+                sendBtn.disabled = false
+              }
+            }
+          } catch (err) {
+            sendStatus.innerHTML = '<span style="color:#c0392b">\u2717 ' + err.message + '</span>'
+            sendBtn.textContent = 'Send'
+            sendBtn.disabled = false
+          }
+        })
+
+        pane.appendChild(sendCard)
 
         // Seed card (collapsible)
         const seedCard = document.createElement('div')
