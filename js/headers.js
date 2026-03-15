@@ -26,6 +26,10 @@ export class HeaderStore extends EventTarget {
     this.hasher = null
   }
 
+  getSourceUrl() {
+    return `${R2_BASE}/${this.chain}/all.bin`
+  }
+
   async initHasher() {
     if (this.hasher) return
     const { createSHA256 } = await import('https://esm.sh/hash-wasm@4')

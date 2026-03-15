@@ -5,6 +5,8 @@
  */
 
 import { HeaderStore } from './headers.js'
+import { BlockFetcher } from './blocks.js'
+import { Storage } from './storage.js'
 
 const NOSTR_RELAYS = [
   'wss://relay.damus.io',
@@ -20,6 +22,8 @@ export class BitcoinDesktop extends EventTarget {
     super()
     this.chain = chain
     this.headers = new HeaderStore(chain)
+    this.blocks = new BlockFetcher(this.headers, chain)
+    this.storage = new Storage(chain)
     this.sockets = {}
     this.nostrTip = 0
     this.status = 'idle'
@@ -27,25 +31,70 @@ export class BitcoinDesktop extends EventTarget {
 
   async start(onProgress) {
     try {
-      // Phase 1: Download headers from R2
+      await this.storage.init()
+
+      // Phase 1: Load cached or download headers from R2
       this.status = 'syncing'
       this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'download', status: 'syncing' } }))
 
-      await this.headers.download((received, total) => {
-        if (onProgress) onProgress('download', received, total)
-      })
+      const cached = await this.storage.loadHeaders()
+      const cachedVerified = await this.storage.loadVerified()
+
+      if (cached && cachedVerified) {
+        // Use cached headers — skip download
+        this.headers.headers = cached
+        this.headers.height = Math.floor(cached.length / 80) - 1
+        this.headers.tipHash = cachedVerified.tipHash
+        this.headers.verified = true
+
+        this.dispatchEvent(new CustomEvent('status', {
+          detail: { phase: 'download', status: 'cached', height: this.headers.height }
+        }))
+
+        // Check if R2 has newer headers
+        try {
+          const headRes = await fetch(this.headers.getSourceUrl(), { method: 'HEAD' })
+          const remoteSize = parseInt(headRes.headers.get('content-length') || '0')
+          const remoteHeight = Math.floor(remoteSize / 80) - 1
+
+          if (remoteHeight > this.headers.height) {
+            this.dispatchEvent(new CustomEvent('status', {
+              detail: { phase: 'download', status: 'updating', height: this.headers.height, remoteHeight }
+            }))
+            await this.headers.download((received, total) => {
+              if (onProgress) onProgress('download', received, total)
+            })
+          }
+        } catch { /* offline is fine, use cached */ }
+      } else {
+        // Fresh download
+        await this.headers.download((received, total) => {
+          if (onProgress) onProgress('download', received, total)
+        })
+      }
 
       this.dispatchEvent(new CustomEvent('status', {
         detail: { phase: 'download', status: 'done', height: this.headers.height }
       }))
 
-      // Phase 2: Verify chain
+      // Phase 2: Verify chain (skip if already verified and not updated)
       this.status = 'verifying'
-      this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'verify', status: 'verifying' } }))
+      let result
 
-      const result = await this.headers.verify((done, total, extra) => {
-        if (onProgress) onProgress('verify', done, total, extra)
-      })
+      if (cached && cachedVerified && this.headers.height === Math.floor(cached.length / 80) - 1) {
+        // Headers unchanged, skip re-verification
+        result = cachedVerified
+        this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'verify', status: 'cached' } }))
+      } else {
+        this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'verify', status: 'verifying' } }))
+        result = await this.headers.verify((done, total, extra) => {
+          if (onProgress) onProgress('verify', done, total, extra)
+        })
+
+        // Save to cache
+        await this.storage.saveHeaders(this.headers.headers)
+        await this.storage.saveVerified(result)
+      }
 
       this.dispatchEvent(new CustomEvent('status', {
         detail: { phase: 'verify', status: 'done', ...result }
