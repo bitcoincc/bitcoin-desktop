@@ -67,6 +67,14 @@
 
     <button class="start-btn" id="startBtn">Start</button>
 
+    <div id="nodeStatus" style="display:none;margin:1rem 0;padding:1rem;border:1px solid #eee;border-radius:4px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+        <div id="nodeActivity" style="font-weight:600;font-size:0.95rem;">Waiting for next block...</div>
+        <div id="nodeScore" style="font-size:0.8rem;color:#888;"></div>
+      </div>
+      <div id="nodeDetails" style="font-size:0.8rem;color:#666;line-height:1.8;"></div>
+    </div>
+
     <div id="phases"></div>
 
     <div id="liveStats" class="live-stats">
@@ -83,14 +91,6 @@
 
     <div id="result"></div>
     <table id="htfuTable" class="htfu-table"></table>
-
-    <div id="nodeStatus" style="display:none;margin:1rem 0;padding:1rem;border:1px solid #eee;border-radius:4px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-        <div id="nodeActivity" style="font-weight:600;font-size:0.95rem;">Waiting for next block...</div>
-        <div id="nodeScore" style="font-size:0.8rem;color:#888;"></div>
-      </div>
-      <div id="nodeDetails" style="font-size:0.8rem;color:#666;line-height:1.8;"></div>
-    </div>
 
     <div class="verify-input" style="display:none" id="verifySection">
       <label style="font-size:0.75rem;color:#888;">txid:</label>
