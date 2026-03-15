@@ -45,6 +45,7 @@ export const DEFAULTS = {
   // Solid server (JSS)
   serveBlocks: false,   // serve blocks locally via JSS
   serverPort: 8443,     // JSS port
+  peers: [],            // remote JSS peers e.g. ['192.168.0.157:8443']
 
   // R2 configuration (for contribution)
   r2: {

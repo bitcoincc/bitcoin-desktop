@@ -11,7 +11,13 @@ export default {
   label: 'Local Solid Server',
   browser: true,
   desktop: true,
+  _host: 'localhost',
   _port: 8443,
+
+  setHost(host, port) {
+    if (host) this._host = host
+    if (port) this._port = port
+  },
 
   setPort(port) {
     this._port = port
@@ -19,7 +25,7 @@ export default {
 
   async fetchBlock(height, hash, chain) {
     const epoch = Math.floor(height / EPOCH_SIZE)
-    const url = `http://localhost:${this._port}/${chain}/blocks/${epoch}/${height}.bin`
+    const url = `http://${this._host}:${this._port}/${chain}/blocks/${epoch}/${height}.bin`
     try {
       const res = await fetch(url)
       if (!res.ok) return null
