@@ -15,8 +15,12 @@ export default {
   async fetchBlock(height, hash, chain) {
     const epoch = Math.floor(height / EPOCH_SIZE)
     const url = `${R2_BASE}/${chain}/blocks/${epoch}/${height}.bin`
-    const res = await fetch(url)
-    if (!res.ok) return null
-    return new Uint8Array(await res.arrayBuffer())
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return null
+      return new Uint8Array(await res.arrayBuffer())
+    } catch {
+      return null
+    }
   }
 }

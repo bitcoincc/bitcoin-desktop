@@ -5,6 +5,7 @@
  * All blocks verified against verified headers before accepting.
  */
 
+import localSource from './sources/local.js'
 import r2Source from './sources/r2.js'
 import blockstreamSource from './sources/blockstream.js'
 import mempoolSource from './sources/mempool.js'
@@ -14,6 +15,7 @@ const HEADER_SIZE = 80
 const EPOCH_SIZE = 2016
 
 const ALL_SOURCES = {
+  local: localSource,
   r2: r2Source,
   blockstream: blockstreamSource,
   mempool: mempoolSource,
@@ -81,13 +83,18 @@ export class BlockFetcher extends EventTarget {
     let block = null
     let usedSource = null
 
+    console.log('[blocks] fetchBlock', height, 'hash=' + hash.slice(0,16) + '... sources:', this.sources.map(s => s.name).join(','))
+
     for (const source of this.sources) {
       try {
-        await this.throttle()
+        console.log('[blocks] trying', source.name, 'for block', height)
+        if (source.name !== 'local') await this.throttle()
         block = await source.fetchBlock(height, hash, this.chain)
+        console.log('[blocks]', source.name, 'returned', block ? block.length + ' bytes' : 'null')
 
         if (block) {
           const valid = await this.verifyBlock(height, block)
+          console.log('[blocks]', source.name, 'verify:', valid, 'size:', block.length)
           if (valid) {
             usedSource = source.name
             this.dispatchEvent(new CustomEvent('fetched', {

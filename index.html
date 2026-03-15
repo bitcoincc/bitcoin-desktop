@@ -262,12 +262,12 @@
         if (d.phase === 'verify' && d.status === 'done') {
           p2.querySelector('.phase-badge').textContent = d.passed ? '\u2713 Verified' : '\u2717 Errors'
           p2.querySelector('.phase-badge').className = 'phase-badge ' + (d.passed ? 'badge-done' : 'badge-error')
-          p2.querySelector('.phase-detail').textContent = 'Verified in ' + d.elapsed + 's'
+          p2.querySelector('.phase-detail').textContent = 'Verified in ' + (d.elapsed || '0') + 's'
           p2.querySelector('.bar-fill').style.width = '100%'
           p2.querySelector('.bar-fill').style.background = '#2d8a4e'
 
-          // Build HTFU results table
-          buildHTFUTable(d.rules, d.elapsed)
+          // Build HTFU results table (only if full rules available)
+          if (d.rules) buildHTFUTable(d.rules, d.elapsed)
         }
         if (d.phase === 'blocks' && d.status === 'bootstrapping') {
           p3.querySelector('.phase-badge').textContent = 'Fetching...'

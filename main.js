@@ -9,8 +9,8 @@ app.whenReady().then(() => {
     height: 768,
     title: 'Bitcoin Desktop',
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
+      nodeIntegration: true,
+      contextIsolation: false,
     }
   })
 

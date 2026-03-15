@@ -8,6 +8,7 @@ import { HeaderStore } from './headers.js'
 import { BlockFetcher } from './blocks.js'
 import { Storage } from './storage.js'
 import { DEFAULTS, mergeConfig, computeScore } from './config.js'
+import localSource from './sources/local.js'
 
 const NOSTR_KIND = 33333
 const NOSTR_PUBKEY = 'cccccccc829b802b7bf52d43edf7cfe62ac89f332a318b6826ac8bd6e73660da'
@@ -32,6 +33,7 @@ export class BitcoinDesktop extends EventTarget {
   async start(onProgress) {
     try {
       await this.storage.init()
+      localSource.setStorage(this.storage)
 
       // Phase 1: Load cached or download headers from R2
       this.status = 'syncing'
@@ -83,18 +85,19 @@ export class BitcoinDesktop extends EventTarget {
         // Save to cache
         await this.storage.saveHeaders(this.headers.headers)
         await this.storage.saveVerified(result)
+
+        this.dispatchEvent(new CustomEvent('status', {
+          detail: { phase: 'verify', status: 'done', ...result }
+        }))
       }
 
-      this.dispatchEvent(new CustomEvent('status', {
-        detail: { phase: 'verify', status: 'done', ...result }
-      }))
-
-      // Phase 3: Bootstrap recent blocks
-      if (this.config.retention > 0) {
+      // Phase 3: Bootstrap recent blocks (just 1 by default, rest arrive via Nostr)
+      const bootstrapCount = this.config.bootstrapBlocks || 1
+      if (this.config.retention > 0 && bootstrapCount > 0) {
         this.dispatchEvent(new CustomEvent('status', {
-          detail: { phase: 'blocks', status: 'bootstrapping', count: this.config.retention }
+          detail: { phase: 'blocks', status: 'bootstrapping', count: bootstrapCount }
         }))
-        await this.blocks.bootstrap(this.config.retention)
+        await this.blocks.bootstrap(bootstrapCount)
         this.dispatchEvent(new CustomEvent('status', {
           detail: { phase: 'blocks', status: 'done', cached: this.blocks.cache.size, totalSize: this.blocks.getTotalSize() }
         }))

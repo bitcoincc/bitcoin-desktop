@@ -26,12 +26,18 @@ export const DEFAULTS = {
 
   // Block sources (in priority order)
   sources: [
-    'r2',             // R2 CDN — our mirror, no limits
-    'blockstream',    // blockstream.info API — free, cacheable
+    'local',          // local cache first
+    'blockstream',    // blockstream.info API (conservative)
+    // 'r2',          // R2 CDN — enable when blocks are uploaded
+    // 'mempool',     // mempool.space API — backup
   ],
 
   // Rate limiting
-  rateLimit: 200,     // ms between API requests
+  rateLimit: 5000,    // ms between block API requests
+
+  // Bootstrap
+  bootstrapBlocks: 1, // fetch only 1 block on startup to prove it works
+                      // rest accumulate naturally via Nostr (~1 every 10 min)
 
   // R2 contribution
   contributeBlocks: false,  // upload verified blocks to R2

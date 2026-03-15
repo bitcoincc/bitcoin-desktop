@@ -18,16 +18,17 @@ const DB_VERSION = 1
 export class Storage {
   constructor(chain = 'btc') {
     this.chain = chain
-    this.isNode = typeof window === 'undefined'
+    // Electron has both window AND Node.js — prefer filesystem
+    this.isNode = typeof process !== 'undefined' && process.versions && process.versions.node
     this.basePath = null  // set in init() for Node
     this.db = null        // set in init() for browser
   }
 
   async init() {
     if (this.isNode) {
-      const os = await import('os')
-      const path = await import('path')
-      const fs = await import('fs')
+      const os = require('os')
+      const path = require('path')
+      const fs = require('fs')
       this.fs = fs
       this.path = path
       this.basePath = path.join(os.homedir(), '.bitcoin-desktop', this.chain)
