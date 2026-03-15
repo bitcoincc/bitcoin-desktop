@@ -26,6 +26,7 @@
     "@scure/bip32": "^2.0.1",
     "@scure/bip39": "^2.0.1",
     "hash-wasm": "^4.12.0",
-    "javascript-solid-server": "^0.0.109"
+    "javascript-solid-server": "^0.0.109",
+    "ws": "^8.19.0"
   }
 }

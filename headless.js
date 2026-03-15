@@ -6,6 +6,9 @@
  * Usage: node headless.js [--chain btc|tbtc4]
  */
 
+import WebSocket from 'ws'
+globalThis.WebSocket = WebSocket
+
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
