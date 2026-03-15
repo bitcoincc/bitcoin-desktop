@@ -84,7 +84,13 @@
     <div id="result"></div>
     <table id="htfuTable" class="htfu-table"></table>
 
-    <div id="blockStatus" style="display:none;margin:1rem 0;padding:0.75rem 1rem;border:1px solid #eee;border-radius:4px;font-size:0.85rem;color:#666;"></div>
+    <div id="nodeStatus" style="display:none;margin:1rem 0;padding:1rem;border:1px solid #eee;border-radius:4px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+        <div id="nodeActivity" style="font-weight:600;font-size:0.95rem;">Waiting for next block...</div>
+        <div id="nodeScore" style="font-size:0.8rem;color:#888;"></div>
+      </div>
+      <div id="nodeDetails" style="font-size:0.8rem;color:#666;line-height:1.8;"></div>
+    </div>
 
     <div class="verify-input" style="display:none" id="verifySection">
       <label style="font-size:0.75rem;color:#888;">txid:</label>
@@ -100,6 +106,7 @@
 
   <script type="module">
     import { BitcoinDesktop } from './js/app.js'
+    import { computeScore } from './js/config.js'
 
     let chain = 'btc'
     let app = null
@@ -265,7 +272,8 @@
           p3.querySelector('.phase-badge').className = 'phase-badge badge-running'
         }
         if (d.phase === 'live') {
-          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString() + (d.score ? ' \u00b7 Score: ' + d.score + '/1000' : '')
+          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
+          if (d.score) nodeScore.textContent = 'Score: ' + d.score + ' / 1000'
         }
         if (d.phase === 'ready') {
           p3.querySelector('.phase-badge').textContent = '\u2713 Live'
@@ -277,6 +285,16 @@
           resultEl.className = 'result pass'
           const verifyElapsed = p2.querySelector('.phase-detail').textContent.match(/[\d.]+s/)?.[0] || ''
           resultEl.textContent = '\u2713 All H-class consensus rules passed \u2014 ' + (app.headers.height + 1).toLocaleString() + ' headers, ' + verifyElapsed
+
+          // Show node status bar
+          nodeStatusEl.style.display = 'block'
+          nodeActivity.textContent = '\u26CF Waiting for next block...'
+          nodeScore.textContent = 'Score: ' + (app.score || computeScore(app.config, { synced: true, relaysConnected: relayCount > 0 })) + ' / 1000'
+          updateNodeStatus()
+
+          // Keep "last block" time updating
+          if (nodeTimerInterval) clearInterval(nodeTimerInterval)
+          nodeTimerInterval = setInterval(updateNodeStatus, 10000)
 
           verifySection.style.display = 'flex'
           startBtn.textContent = 'Restart'
@@ -304,18 +322,67 @@
         p3.querySelector('.phase-detail').textContent = 'Tip: block ' + e.detail.height.toLocaleString()
       })
 
-      const blockStatusEl = document.getElementById('blockStatus')
+      const nodeStatusEl = document.getElementById('nodeStatus')
+      const nodeActivity = document.getElementById('nodeActivity')
+      const nodeScore = document.getElementById('nodeScore')
+      const nodeDetails = document.getElementById('nodeDetails')
+      let lastBlockTime = null
+      let blocksStored = 0
+      let blocksMB = 0
+      let relayCount = 0
+      let relayTotal = 0
+      let nodeTimerInterval = null
+
+      function updateNodeStatus() {
+        const ago = lastBlockTime ? timeAgo(lastBlockTime) : 'never'
+        nodeDetails.textContent =
+          'Tip: ' + (app.headers.height).toLocaleString() +
+          ' \u00b7 ' + relayCount + '/' + relayTotal + ' relays' +
+          ' \u00b7 Retention: ' + app.config.retention + ' blocks' +
+          ' \u00b7 ' + blocksStored + ' cached (' + blocksMB.toFixed(1) + ' MB)' +
+          ' \u00b7 Last block: ' + ago
+      }
+
+      function timeAgo(date) {
+        const s = Math.floor((Date.now() - date) / 1000)
+        if (s < 5) return 'just now'
+        if (s < 60) return s + 's ago'
+        if (s < 3600) return Math.floor(s / 60) + 'm ago'
+        return Math.floor(s / 3600) + 'h ago'
+      }
+
+      app.addEventListener('relay', (e) => {
+        relayCount = e.detail.count
+        relayTotal = e.detail.total
+        if (nodeStatusEl.style.display !== 'none') updateNodeStatus()
+      })
 
       app.addEventListener('blockfetched', (e) => {
-        blockStatusEl.style.display = 'block'
+        lastBlockTime = Date.now()
+        blocksStored++
+        blocksMB += e.detail.size / 1024 / 1024
         const sizeMB = (e.detail.size / 1024 / 1024).toFixed(2)
-        blockStatusEl.textContent = '\u2713 Block ' + e.detail.height.toLocaleString() + ' fetched and verified (' + sizeMB + ' MB)'
+        nodeActivity.textContent = '\u2713 Block ' + e.detail.height.toLocaleString() + ' verified (' + sizeMB + ' MB)'
+        nodeActivity.style.color = '#2d8a4e'
+        updateNodeStatus()
+        // Reset to waiting after 10 seconds
+        setTimeout(() => {
+          nodeActivity.textContent = '\u26CF Waiting for next block...'
+          nodeActivity.style.color = '#2c2c2c'
+        }, 10000)
       })
 
       app.addEventListener('blockerror', (e) => {
-        blockStatusEl.style.display = 'block'
-        blockStatusEl.textContent = '\u26A0 Block ' + e.detail.height.toLocaleString() + ': ' + e.detail.error
-        blockStatusEl.style.color = '#c0392b'
+        nodeActivity.textContent = '\u26A0 Block ' + e.detail.height.toLocaleString() + ': ' + e.detail.error
+        nodeActivity.style.color = '#b8860b'
+        updateNodeStatus()
+      })
+
+      app.addEventListener('newblock', (e) => {
+        if (!lastBlockTime) lastBlockTime = Date.now()
+        nodeActivity.textContent = '\u26CF Block ' + e.detail.height.toLocaleString() + ' arrived \u2014 fetching...'
+        nodeActivity.style.color = '#f7931a'
+        updateNodeStatus()
       })
 
       app.start((phase, done, total, extra) => {
