@@ -32,7 +32,9 @@ export class HeaderStore extends EventTarget {
 
   async initHasher() {
     if (this.hasher) return
-    const { createSHA256 } = await import('https://esm.sh/hash-wasm@4')
+    let createSHA256
+    try { ({ createSHA256 } = await import('hash-wasm')) }
+    catch { ({ createSHA256 } = await import('https://esm.sh/hash-wasm@4')) }
     this.hasher = await createSHA256()
   }
 
