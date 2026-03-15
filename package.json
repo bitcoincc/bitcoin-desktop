@@ -1,0 +1,14 @@
+{
+  "name": "bitcoin-desktop",
+  "version": "0.0.1",
+  "description": "Bitcoin desktop client — full HTFU verification, headers to full node",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bitcoincc/bitcoin-desktop"
+  },
+  "license": "MIT"
+}
