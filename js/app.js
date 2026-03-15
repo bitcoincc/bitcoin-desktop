@@ -11,6 +11,7 @@ import { DEFAULTS, mergeConfig, computeScore } from './config.js'
 import { BlockUploader } from './uploader.js'
 import { Scanner } from './scanner.js'
 import localSource from './sources/local.js'
+import jssSource from './sources/jss.js'
 
 const NOSTR_KIND = 33333
 const NOSTR_PUBKEY = 'cccccccc829b802b7bf52d43edf7cfe62ac89f332a318b6826ac8bd6e73660da'
@@ -39,6 +40,7 @@ export class BitcoinDesktop extends EventTarget {
     try {
       await this.storage.init()
       localSource.setStorage(this.storage)
+      jssSource.setPort(this.config.serverPort || 8443)
 
       // Phase 1: Load cached or download headers from R2
       this.status = 'syncing'

@@ -27,6 +27,7 @@ export const DEFAULTS = {
   // Block sources (in priority order)
   sources: [
     'local',          // local cache first
+    'jss',            // local Solid server (if running)
     'r2',             // R2 CDN — blocks uploaded by other clients
     'p2p',            // Bitcoin P2P network (fallback, no rate limits)
     // 'blockstream', // blockstream.info API (emergency fallback)
