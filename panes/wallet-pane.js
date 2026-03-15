@@ -202,12 +202,53 @@ export default {
       return crypto.schnorr.getPublicKey(tweakedPriv)
     }
 
+    function validateAddress(addr) {
+      try {
+        const { bech32m } = crypto
+        const decoded = bech32m.decode(addr)
+        const hrp = decoded.prefix
+        const witnessVer = decoded.words[0]
+        const program = bech32m.fromWords(decoded.words.slice(1))
+        if (chain === 'btc' && hrp !== 'bc') return { valid: false, error: 'Expected mainnet address (bc1...)' }
+        if (chain === 'tbtc4' && hrp !== 'tb') return { valid: false, error: 'Expected testnet address (tb1...)' }
+        if (witnessVer === 1 && program.length === 32) return { valid: true, type: 'p2tr' }
+        return { valid: false, error: 'Only Taproot (P2TR) addresses supported' }
+      } catch {
+        return { valid: false, error: 'Invalid address' }
+      }
+    }
+
     function createOutputScript(addr) {
       const { bech32m } = crypto
-      const decoded = bech32m.decode(addr)
-      const witnessVer = decoded.words[0]
-      const program = bech32m.fromWords(decoded.words.slice(1))
-      return new Uint8Array([0x51, 0x20, ...program]) // OP_1 PUSH32
+      try {
+        const decoded = bech32m.decode(addr)
+        const witnessVer = decoded.words[0]
+        const program = bech32m.fromWords(decoded.words.slice(1))
+        if (witnessVer === 1 && program.length === 32) {
+          return new Uint8Array([0x51, 0x20, ...program]) // OP_1 PUSH32 (P2TR)
+        }
+      } catch {}
+
+      // Try segwit v0
+      try {
+        const decoded = crypto.bech32m.decode(addr) // will fail, fall through
+      } catch {}
+
+      // Fallback: try manual bech32 decode for p2wpkh
+      // For now only support P2TR
+      throw new Error('Only Taproot (P2TR) addresses supported')
+    }
+
+    async function fetchFeeRate() {
+      const api = chain === 'btc' ? 'https://mempool.space/api' : 'https://mempool.space/testnet4/api'
+      try {
+        const res = await fetch(`${api}/v1/fees/recommended`)
+        if (!res.ok) return 2
+        const fees = await res.json()
+        return fees.halfHourFee || fees.hourFee || 2
+      } catch {
+        return 2
+      }
     }
 
     async function fetchUtxos() {
@@ -433,40 +474,69 @@ export default {
         sendStatus.style.cssText = 'margin-top:0.75rem;font-size:0.85rem;'
         sendCard.appendChild(sendStatus)
 
+        // Fetch fee rate on load
+        fetchFeeRate().then(rate => {
+          const feeInput = pane.querySelector('#sendFeeRate')
+          if (feeInput) feeInput.value = rate
+        })
+
         sendBtn.addEventListener('click', async () => {
           const to = pane.querySelector('#sendTo').value.trim()
           const amount = parseInt(pane.querySelector('#sendAmount').value)
           const feeRate = parseInt(pane.querySelector('#sendFeeRate').value) || 2
 
-          if (!to || !amount || amount < 330) {
-            sendStatus.textContent = 'Enter a valid address and amount (min 330 sats)'
-            sendStatus.style.color = '#c0392b'
-            return
-          }
+          sendStatus.textContent = ''
+
+          // Validate address
+          if (!to) { sendStatus.textContent = 'Enter a destination address'; sendStatus.style.color = '#c0392b'; return }
+          const addrCheck = validateAddress(to)
+          if (!addrCheck.valid) { sendStatus.textContent = addrCheck.error; sendStatus.style.color = '#c0392b'; return }
+
+          // Validate amount
+          if (!amount || amount < 330) { sendStatus.textContent = 'Minimum amount is 330 sats'; sendStatus.style.color = '#c0392b'; return }
 
           sendBtn.disabled = true
           sendBtn.textContent = 'Building tx...'
-          sendStatus.textContent = ''
 
           try {
             const tx = await buildAndSignTx(to, amount, feeRate)
-            sendStatus.innerHTML = 'Fee: ' + tx.fee + ' sats<br>'
-            sendBtn.textContent = 'Broadcast'
+
+            // Show confirmation
+            const total = amount + tx.fee
+            const explorer = chain === 'btc' ? 'https://mempool.space' : 'https://mempool.space/testnet4'
+            sendStatus.innerHTML =
+              '<div style="background:#f5f4f0;padding:0.75rem;border-radius:4px;margin:0.5rem 0;font-size:0.85rem;">' +
+              '<div style="margin-bottom:0.5rem;font-weight:600;">Confirm Transaction</div>' +
+              '<div>To: <span style="font-family:monospace;font-size:0.75rem;">' + to.slice(0, 20) + '...' + to.slice(-8) + '</span></div>' +
+              '<div>Amount: <strong>' + amount.toLocaleString() + ' sats</strong></div>' +
+              '<div>Fee: ' + tx.fee.toLocaleString() + ' sats (' + feeRate + ' sat/vB)</div>' +
+              '<div>Total: <strong>' + total.toLocaleString() + ' sats</strong></div>' +
+              '</div>'
+
+            sendBtn.textContent = 'Confirm & Broadcast'
             sendBtn.disabled = false
 
-            // Replace click to broadcast
             sendBtn.onclick = async () => {
               sendBtn.disabled = true
               sendBtn.textContent = 'Broadcasting...'
               try {
                 const txid = await broadcastTx(tx.hex)
-                sendStatus.innerHTML = '<span style="color:#2d8a4e">\u2713 Sent!</span><br><span style="font-family:monospace;font-size:0.75rem;word-break:break-all;">' + txid + '</span>'
+                sendStatus.innerHTML =
+                  '<div style="color:#2d8a4e;font-weight:bold;margin-bottom:0.5rem;">\u2713 Sent!</div>' +
+                  '<div style="font-family:monospace;font-size:0.75rem;word-break:break-all;margin-bottom:0.5rem;">' + txid + '</div>' +
+                  '<a href="' + explorer + '/tx/' + txid + '" style="font-size:0.8rem;color:#1a5276;" target="_blank">View on mempool.space \u2197</a>'
                 sendBtn.textContent = 'Send'
                 sendBtn.disabled = false
-                sendBtn.onclick = null // reset
+                sendBtn.onclick = null
+                // Refresh balance
+                const bal = await checkBalance()
+                if (bal) {
+                  balanceEl.textContent = bal.total.toLocaleString()
+                  balanceLabel.textContent = bal.unconfirmed ? 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)' : 'sats'
+                }
               } catch (err) {
                 sendStatus.innerHTML = '<span style="color:#c0392b">\u2717 ' + err.message + '</span>'
-                sendBtn.textContent = 'Retry Broadcast'
+                sendBtn.textContent = 'Retry'
                 sendBtn.disabled = false
               }
             }
