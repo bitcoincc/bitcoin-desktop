@@ -8,6 +8,7 @@ import { HeaderStore } from './headers.js'
 import { BlockFetcher } from './blocks.js'
 import { Storage } from './storage.js'
 import { DEFAULTS, mergeConfig, computeScore } from './config.js'
+import { BlockUploader } from './uploader.js'
 import localSource from './sources/local.js'
 
 const NOSTR_KIND = 33333
@@ -24,6 +25,8 @@ export class BitcoinDesktop extends EventTarget {
     this.blocks.rateLimitMs = this.config.rateLimit
     this.blocks.sourceNames = this.config.sources
     this.storage = new Storage(chain)
+    this.uploader = new BlockUploader(chain)
+    this.uploader.enabled = this.config.contributeBlocks || false
     this.sockets = {}
     this.nostrTip = 0
     this.status = 'idle'
@@ -219,6 +222,9 @@ export class BitcoinDesktop extends EventTarget {
 
         // Save to local storage
         await this.storage.saveBlock(h, block)
+
+        // Contribute to R2 CDN
+        this.uploader.upload(h, block).catch(() => {})
 
         this.dispatchEvent(new CustomEvent('blockfetched', {
           detail: { height: h, size: block.length }

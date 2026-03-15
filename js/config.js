@@ -39,7 +39,7 @@ export const DEFAULTS = {
   bootstrapBlocks: 12, // fetch last 12 blocks on startup (matches NIP-333 batch)
 
   // R2 contribution
-  contributeBlocks: false,  // upload verified blocks to R2
+  contributeBlocks: true,   // upload verified blocks to R2 (helps the network)
 
   // R2 configuration (for contribution)
   r2: {

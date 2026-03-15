@@ -376,8 +376,11 @@
       })
 
       app.blocks.addEventListener('fetched', (e) => {
-        // Save block to disk
-        if (e.detail.block) app.storage.saveBlock(e.detail.height, e.detail.block).catch(() => {})
+        // Save block to disk + contribute to R2
+        if (e.detail.block) {
+          app.storage.saveBlock(e.detail.height, e.detail.block).catch(() => {})
+          app.uploader.upload(e.detail.height, e.detail.block).catch(() => {})
+        }
 
         lastBlockTime = Date.now()
         blocksStored++
