@@ -1,18 +1,24 @@
 /**
- * Block fetcher — multi-source block downloads with verification
+ * Block fetcher — modular multi-source block downloads with verification
  *
- * Sources (in priority order):
- *   1. R2 CDN (our own, no limits)
- *   2. Blockstream.info API (free, cacheable)
- *   3. Bitcoin P2P network (desktop only, raw protocol)
- *
+ * Sources are pluggable modules in ./sources/
  * All blocks verified against verified headers before accepting.
  */
 
-const R2_BASE = 'https://pub-a5a92731dd0d452b9670be07e5354fd6.r2.dev'
-const BLOCKSTREAM_API = 'https://blockstream.info/api'
+import r2Source from './sources/r2.js'
+import blockstreamSource from './sources/blockstream.js'
+import mempoolSource from './sources/mempool.js'
+import p2pSource from './sources/p2p.js'
+
 const HEADER_SIZE = 80
 const EPOCH_SIZE = 2016
+
+const ALL_SOURCES = {
+  r2: r2Source,
+  blockstream: blockstreamSource,
+  mempool: mempoolSource,
+  p2p: p2pSource,
+}
 
 export class BlockFetcher extends EventTarget {
   constructor(headerStore, chain = 'btc') {
@@ -20,10 +26,18 @@ export class BlockFetcher extends EventTarget {
     this.headers = headerStore
     this.chain = chain
     this.cache = new Map()         // height → Uint8Array
-    this.retention = 5000          // max blocks to keep
-    this.rateLimitMs = 200         // min ms between API requests
+    this.retention = 12
+    this.rateLimitMs = 200
     this.lastRequest = 0
-    this.sources = ['r2', 'blockstream']  // configurable
+    this.sourceNames = ['r2', 'blockstream']  // configurable order
+    this.isBrowser = typeof window !== 'undefined'
+  }
+
+  // Get active source modules (filtered by environment)
+  get sources() {
+    return this.sourceNames
+      .map(name => ALL_SOURCES[name])
+      .filter(s => s && (this.isBrowser ? s.browser : s.desktop))
   }
 
   // Rate limiter
@@ -46,86 +60,50 @@ export class BlockFetcher extends EventTarget {
   async verifyBlock(height, blockData) {
     await this.headers.initHasher()
     const block = new Uint8Array(blockData)
-
-    // Block must be at least 80 bytes (header)
     if (block.length < HEADER_SIZE) return false
 
-    // Hash the header portion
     const headerBytes = block.subarray(0, HEADER_SIZE)
     const hash = this.headers.headerHash(headerBytes)
     const expectedHash = this.getBlockHash(height)
-
     if (!expectedHash) return false
     return hash === expectedHash
   }
 
-  // Fetch from R2 CDN
-  async fetchFromR2(height) {
-    const epoch = Math.floor(height / EPOCH_SIZE)
-    const url = `${R2_BASE}/${this.chain}/blocks/${epoch}/${height}.bin`
-    try {
-      const res = await fetch(url)
-      if (!res.ok) return null
-      return new Uint8Array(await res.arrayBuffer())
-    } catch {
-      return null
-    }
-  }
-
-  // Fetch from Blockstream.info
-  async fetchFromBlockstream(height) {
-    const hash = this.getBlockHash(height)
-    if (!hash) return null
-
-    const api = this.chain === 'tbtc4'
-      ? 'https://mempool.space/testnet4/api'
-      : BLOCKSTREAM_API
-
-    await this.throttle()
-    try {
-      const res = await fetch(`${api}/block/${hash}/raw`)
-      if (!res.ok) return null
-      return new Uint8Array(await res.arrayBuffer())
-    } catch {
-      return null
-    }
-  }
-
   // Fetch a block from any source, verify, cache
   async fetchBlock(height) {
-    // Check cache first
     if (this.cache.has(height)) return this.cache.get(height)
+
+    const hash = this.getBlockHash(height)
+    if (!hash) throw new Error('No verified header for block ' + height)
 
     this.dispatchEvent(new CustomEvent('fetching', { detail: { height } }))
 
     let block = null
+    let usedSource = null
 
     for (const source of this.sources) {
       try {
-        if (source === 'r2') {
-          block = await this.fetchFromR2(height)
-        } else if (source === 'blockstream') {
-          block = await this.fetchFromBlockstream(height)
-        }
+        await this.throttle()
+        block = await source.fetchBlock(height, hash, this.chain)
 
         if (block) {
-          // Verify against headers
           const valid = await this.verifyBlock(height, block)
           if (valid) {
+            usedSource = source.name
             this.dispatchEvent(new CustomEvent('fetched', {
-              detail: { height, size: block.length, source }
+              detail: { height, size: block.length, source: source.name }
             }))
             break
           } else {
             this.dispatchEvent(new CustomEvent('rejected', {
-              detail: { height, source, reason: 'hash mismatch' }
+              detail: { height, source: source.name, reason: 'hash mismatch' }
             }))
             block = null
           }
         }
       } catch (err) {
         this.dispatchEvent(new CustomEvent('error', {
-          detail: { height, source, error: err.message }
+          detail: { height, source: source.name, error: err.message }
         }))
       }
     }
@@ -134,28 +112,41 @@ export class BlockFetcher extends EventTarget {
       throw new Error('Could not fetch block ' + height + ' from any source')
     }
 
-    // Cache and prune
     this.cache.set(height, block)
     this.pruneCache()
-
     return block
   }
 
-  // Fetch a range of blocks
-  async fetchRange(fromHeight, toHeight) {
-    const blocks = []
-    for (let h = fromHeight; h <= toHeight; h++) {
-      const block = await this.fetchBlock(h)
-      blocks.push({ height: h, data: block })
+  // Bootstrap — fetch last N blocks
+  async bootstrap(count) {
+    if (!this.headers.headers || this.headers.height < 0) return
+
+    const tipHeight = this.headers.height
+    const fromHeight = Math.max(0, tipHeight - count + 1)
+
+    this.dispatchEvent(new CustomEvent('bootstrap', {
+      detail: { from: fromHeight, to: tipHeight, count: tipHeight - fromHeight + 1 }
+    }))
+
+    for (let h = fromHeight; h <= tipHeight; h++) {
+      try {
+        await this.fetchBlock(h)
+      } catch (err) {
+        this.dispatchEvent(new CustomEvent('error', {
+          detail: { height: h, source: 'bootstrap', error: err.message }
+        }))
+      }
     }
-    return blocks
+
+    this.dispatchEvent(new CustomEvent('bootstrapped', {
+      detail: { cached: this.cache.size, totalSize: this.getTotalSize() }
+    }))
   }
 
   // Prune cache to retention limit
   pruneCache() {
-    if (this.cache.size <= this.retention) return
+    if (this.retention <= 0 || this.cache.size <= this.retention) return
 
-    // Remove oldest blocks first
     const heights = Array.from(this.cache.keys()).sort((a, b) => a - b)
     const toRemove = heights.length - this.retention
     for (let i = 0; i < toRemove; i++) {
@@ -164,12 +155,18 @@ export class BlockFetcher extends EventTarget {
     }
   }
 
-  // Parse a raw block into header + transactions
+  // Total cached size in bytes
+  getTotalSize() {
+    let total = 0
+    for (const block of this.cache.values()) total += block.length
+    return total
+  }
+
+  // Parse a raw block into header + tx count
   static parseBlock(blockData) {
     const block = new Uint8Array(blockData)
     const header = block.subarray(0, HEADER_SIZE)
 
-    // Read varint for tx count
     let offset = HEADER_SIZE
     let txCount = 0
     const firstByte = block[offset]
@@ -185,25 +182,18 @@ export class BlockFetcher extends EventTarget {
       offset += 5
     }
 
-    return {
-      header,
-      txCount,
-      rawTxOffset: offset,
-      size: block.length,
-    }
+    return { header, txCount, rawTxOffset: offset, size: block.length }
   }
 
-  // Get stats
   getStats() {
     const heights = Array.from(this.cache.keys()).sort((a, b) => a - b)
-    const totalSize = Array.from(this.cache.values()).reduce((s, b) => s + b.length, 0)
     return {
       cached: this.cache.size,
       retention: this.retention,
       lowest: heights[0] || null,
       highest: heights[heights.length - 1] || null,
-      totalSize,
-      sources: this.sources,
+      totalSize: this.getTotalSize(),
+      sources: this.sourceNames,
     }
   }
 }

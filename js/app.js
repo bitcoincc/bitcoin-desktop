@@ -89,7 +89,18 @@ export class BitcoinDesktop extends EventTarget {
         detail: { phase: 'verify', status: 'done', ...result }
       }))
 
-      // Phase 3: Connect to Nostr for live headers (NIP-333)
+      // Phase 3: Bootstrap recent blocks
+      if (this.config.retention > 0) {
+        this.dispatchEvent(new CustomEvent('status', {
+          detail: { phase: 'blocks', status: 'bootstrapping', count: this.config.retention }
+        }))
+        await this.blocks.bootstrap(this.config.retention)
+        this.dispatchEvent(new CustomEvent('status', {
+          detail: { phase: 'blocks', status: 'done', cached: this.blocks.cache.size, totalSize: this.blocks.getTotalSize() }
+        }))
+      }
+
+      // Phase 4: Connect to Nostr for live headers (NIP-333)
       this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'nostr', status: 'connecting' } }))
 
       let connected = 0
