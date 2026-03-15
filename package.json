@@ -3,8 +3,11 @@
   "version": "0.0.1",
   "description": "Bitcoin desktop client — full HTFU verification, headers to full node",
   "type": "module",
+  "main": "main.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "web": "npx serve ."
   },
   "repository": {
     "type": "git",
