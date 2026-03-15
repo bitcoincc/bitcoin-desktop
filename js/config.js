@@ -41,6 +41,10 @@ export const DEFAULTS = {
   // R2 contribution
   contributeBlocks: true,   // upload verified blocks to R2 (helps the network)
 
+  // Solid server (JSS)
+  serveBlocks: false,   // serve blocks locally via JSS
+  serverPort: 8443,     // JSS port
+
   // R2 configuration (for contribution)
   r2: {
     bucket: 'bitcoin-headers',

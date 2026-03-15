@@ -126,6 +126,20 @@ export default {
       updateUI()
     })
 
+    // Server
+    const serverGroup = document.createElement('div')
+    serverGroup.className = 'setting-group'
+    serverGroup.innerHTML = '<div class="setting-label">Solid Server</div><div class="setting-row"><span>Serve blocks locally (JSS)</span><input type="checkbox" id="sServe" ' + (currentConfig.serveBlocks ? 'checked' : '') + '></div><div class="setting-row"><span>Port</span><input type="number" id="sPort" value="' + (currentConfig.serverPort || 8443) + '" min="1024" max="65535" style="width:80px;padding:0.3rem 0.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:0.85rem;text-align:right;"></div>'
+    pane.appendChild(serverGroup)
+
+    pane.querySelector('#sServe').addEventListener('change', (e) => {
+      currentConfig.serveBlocks = e.target.checked
+      updateUI()
+    })
+    pane.querySelector('#sPort').addEventListener('change', (e) => {
+      currentConfig.serverPort = parseInt(e.target.value) || 8443
+    })
+
     // Apply button
     const applyBtn = document.createElement('button')
     applyBtn.className = 'apply-btn'
