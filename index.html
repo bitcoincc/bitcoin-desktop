@@ -376,6 +376,9 @@
       })
 
       app.blocks.addEventListener('fetched', (e) => {
+        // Save block to disk
+        if (e.detail.block) app.storage.saveBlock(e.detail.height, e.detail.block).catch(() => {})
+
         lastBlockTime = Date.now()
         blocksStored++
         blocksMB += e.detail.size / 1024 / 1024

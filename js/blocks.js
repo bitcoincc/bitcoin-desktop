@@ -98,7 +98,7 @@ export class BlockFetcher extends EventTarget {
           if (valid) {
             usedSource = source.name
             this.dispatchEvent(new CustomEvent('fetched', {
-              detail: { height, size: block.length, source: source.name }
+              detail: { height, size: block.length, source: source.name, block }
             }))
             break
           } else {
