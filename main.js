@@ -52,6 +52,11 @@ app.whenReady().then(() => {
       jssProcess.on('exit', code => console.log('[jss] exited with code', code))
 
       console.log(`[jss] starting on port ${port}, root: ${DATA_DIR}`)
+
+      // Start proof server on port+1
+      import('./js/proof-server.js').then(({ startProofServer }) => {
+        startProofServer(DATA_DIR, config.chain || 'btc', port + 1)
+      }).catch(err => console.log('[proof] failed:', err.message))
     }
   } catch (err) {
     console.log('[jss] error:', err.message)

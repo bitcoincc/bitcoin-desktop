@@ -10,6 +10,7 @@ import { Storage } from './storage.js'
 import { DEFAULTS, mergeConfig, computeScore } from './config.js'
 import { BlockUploader } from './uploader.js'
 import { Scanner } from './scanner.js'
+import { MerkleVerifier } from './merkle.js'
 import localSource from './sources/local.js'
 import jssSource from './sources/jss.js'
 
@@ -31,6 +32,8 @@ export class BitcoinDesktop extends EventTarget {
     this.uploader = new BlockUploader(chain)
     this.uploader.enabled = this.config.contributeBlocks || false
     this.scanner = new Scanner(chain)
+    this.merkle = null // initialized after hasher ready
+    this.merkleStats = { checked: 0, passed: 0, failed: 0 }
     this.sockets = {}
     this.nostrTip = 0
     this.status = 'idle'
@@ -191,6 +194,10 @@ export class BitcoinDesktop extends EventTarget {
         }
       }
 
+      // Initialize merkle verifier with the same hasher
+      await this.headers.initHasher()
+      this.merkle = new MerkleVerifier(this.headers.hasher)
+
       this.status = 'ready'
       this.dispatchEvent(new CustomEvent('status', {
         detail: { phase: 'ready', height: this.headers.height, tipHash: this.headers.tipHash }
@@ -234,6 +241,21 @@ export class BitcoinDesktop extends EventTarget {
         this.dispatchEvent(new CustomEvent('blockfetched', {
           detail: { height: h, size: block.length }
         }))
+
+        // Verify merkle root (T-class)
+        if (this.merkle) {
+          const mr = this.merkle.verifyBlock(block)
+          this.merkleStats.checked++
+          if (mr.valid) {
+            this.merkleStats.passed++
+          } else {
+            this.merkleStats.failed++
+            console.error('[merkle] FAILED block', h, mr.headerRoot, '!=', mr.computedRoot)
+          }
+          this.dispatchEvent(new CustomEvent('merkle', {
+            detail: { height: h, valid: mr.valid, txCount: mr.txCount, ...this.merkleStats }
+          }))
+        }
 
         // Scan block for wallet transactions
         this.scanBlock(h, block)

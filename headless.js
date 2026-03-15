@@ -49,6 +49,10 @@ if (config.serveBlocks) {
   jss.stderr.on('data', d => {})
   console.log(`JSS serving on port ${port}`)
 
+  // Start proof server on port+1
+  const { startProofServer } = await import('./js/proof-server.js')
+  await startProofServer(DATA_DIR, chain, port + 1)
+
   process.on('SIGINT', () => { jss.kill(); process.exit() })
 }
 

@@ -193,21 +193,29 @@ export default {
       }
     }
 
-    function buildHTFUTable(rules) {
+    function buildHTFUTable(rules, merkle) {
       const rows = [
         { section: 'H \u2014 Header-Only (verified from 80-byte headers)' },
-        { name: 'Genesis block hash matches', ...rules.genesis, evidence: 'First header \u2192 known hash' },
-        { name: 'Previous block hash links correctly', ...rules.linkage, evidence: 'Adjacent headers' },
-        { name: 'Proof-of-work meets difficulty target', ...rules.pow, evidence: 'Block header (80 bytes)' },
-        { name: 'Difficulty retarget is correct', ...rules.retarget, evidence: 'Previous 2016 headers' },
-        { name: 'Timestamp > median of previous 11', ...rules.median, evidence: 'Previous 11 headers' },
-        { name: 'Block version valid for height', ...rules.version, evidence: 'Header + height' },
+        { name: 'Genesis block hash matches', badge: 'H', ...rules.genesis, evidence: 'First header \u2192 known hash' },
+        { name: 'Previous block hash links correctly', badge: 'H', ...rules.linkage, evidence: 'Adjacent headers' },
+        { name: 'Proof-of-work meets difficulty target', badge: 'H', ...rules.pow, evidence: 'Block header (80 bytes)' },
+        { name: 'Difficulty retarget is correct', badge: 'H', ...rules.retarget, evidence: 'Previous 2016 headers' },
+        { name: 'Timestamp > median of previous 11', badge: 'H', ...rules.median, evidence: 'Previous 11 headers' },
+        { name: 'Block version valid for height', badge: 'H', ...rules.version, evidence: 'Header + height' },
       ]
+
+      if (merkle && merkle.checked > 0) {
+        rows.push({ section: 'T \u2014 Transaction-Level (verified from full blocks)' })
+        rows.push({ name: 'Merkle root matches transactions', badge: 'T', checked: merkle.checked, passed: merkle.passed, evidence: 'All transactions in block \u2192 recomputed merkle root' })
+      }
+
       let html = '<thead><tr><th>Consensus Rule</th><th></th><th>Checked</th><th>Passed</th><th>Status</th></tr></thead><tbody>'
       for (const row of rows) {
         if (row.section) { html += '<tr class="htfu-section"><td colspan="5">' + row.section + '</td></tr>'; continue }
+        const b = row.badge || 'H'
+        const badgeColor = b === 'T' ? 'background:#3b82f6' : 'background:#2d8a4e'
         const pass = row.checked === row.passed
-        html += '<tr><td style="font-weight:500">' + row.name + '</td><td><span class="htfu-badge">H</span></td><td>' + row.checked.toLocaleString() + '</td><td>' + row.passed.toLocaleString() + '</td><td class="' + (pass ? 'htfu-pass' : '') + '">' + (pass ? '\u2713 Pass' : '\u2717 ' + (row.checked - row.passed) + ' failures') + '</td></tr>'
+        html += '<tr><td style="font-weight:500">' + row.name + '</td><td><span class="htfu-badge" style="' + badgeColor + '">' + b + '</span></td><td>' + row.checked.toLocaleString() + '</td><td>' + row.passed.toLocaleString() + '</td><td class="' + (pass ? 'htfu-pass' : '') + '">' + (pass ? '\u2713 Pass' : '\u2717 ' + (row.checked - row.passed) + ' failures') + '</td></tr>'
         if (row.evidence) html += '<tr><td colspan="5" class="htfu-evidence">' + row.evidence + '</td></tr>'
       }
       html += '</tbody>'
@@ -217,7 +225,7 @@ export default {
 
     // State
     let lastBlockTime = null, blocksStored = 0, blocksMB = 0, relayCount = 0, relayTotal = 0
-    let p1, p2, p3, p4
+    let p1, p2, p3, p4, lastRules = null
 
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true
@@ -271,7 +279,7 @@ export default {
           p2.querySelector('.phase-detail').textContent = 'Verified in ' + (d.elapsed || '0') + 's'
           p2.querySelector('.bar-fill').style.width = '100%'
           p2.querySelector('.bar-fill').style.background = '#2d8a4e'
-          if (d.rules) buildHTFUTable(d.rules)
+          if (d.rules) { lastRules = d.rules; buildHTFUTable(d.rules, app?.merkleStats) }
         }
         if (d.phase === 'nostr' && d.status === 'connecting') {
           p3.querySelector('.phase-badge').textContent = 'Connecting...'
@@ -293,6 +301,11 @@ export default {
           p4.querySelector('.phase-detail').textContent = d.cached + ' blocks cached (' + sizeMB + ' MB)'
           p4.querySelector('.bar-fill').style.width = '100%'
           p4.querySelector('.bar-fill').style.background = '#2d8a4e'
+          // Rebuild HTFU table with T-class merkle results
+          if (app.merkleStats.checked > 0) {
+            if (!lastRules) lastRules = { genesis: {checked:0,passed:0}, linkage: {checked:0,passed:0}, pow: {checked:0,passed:0}, retarget: {checked:0,passed:0}, median: {checked:0,passed:0}, version: {checked:0,passed:0} }
+            buildHTFUTable(lastRules, app.merkleStats)
+          }
         }
         if (d.phase === 'ready') {
           p3.querySelector('.phase-badge').textContent = '\u2713 Live'
@@ -334,6 +347,14 @@ export default {
         if (e.detail.block) {
           app.storage.saveBlock(e.detail.height, e.detail.block).catch(() => {})
           app.uploader.upload(e.detail.height, e.detail.block).catch(() => {})
+
+          // Merkle verification (T-class)
+          if (app.merkle) {
+            const mr = app.merkle.verifyBlock(e.detail.block)
+            app.merkleStats.checked++
+            if (mr.valid) app.merkleStats.passed++
+            else app.merkleStats.failed++
+          }
         }
         lastBlockTime = Date.now()
         blocksStored++

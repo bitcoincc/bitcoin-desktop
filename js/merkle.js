@@ -149,6 +149,52 @@ export class MerkleVerifier {
     return txHashes
   }
 
+  // Generate a merkle proof for a specific txid in a block
+  generateProof(blockData, targetTxid) {
+    const txHashes = this.extractTxHashes(blockData)
+    if (txHashes.length === 0) return null
+
+    // Compute real txids (reversed display order)
+    const txids = txHashes.map(h => Array.from(h).reverse().map(b => b.toString(16).padStart(2, '0')).join(''))
+
+    const pos = txids.indexOf(targetTxid)
+    if (pos === -1) return null
+
+    // Build merkle proof — collect siblings at each level
+    let level = txHashes.map(h => new Uint8Array(h))
+    let idx = pos
+    const proof = []
+
+    while (level.length > 1) {
+      // Sibling index
+      const siblingIdx = (idx % 2 === 0) ? idx + 1 : idx - 1
+      const sibling = siblingIdx < level.length ? level[siblingIdx] : level[idx]
+      // Store sibling hash in display order (reversed)
+      proof.push(Array.from(sibling).reverse().map(b => b.toString(16).padStart(2, '0')).join(''))
+
+      // Compute next level
+      const next = []
+      for (let i = 0; i < level.length; i += 2) {
+        const left = level[i]
+        const right = i + 1 < level.length ? level[i + 1] : level[i]
+        const combined = new Uint8Array(64)
+        combined.set(left, 0)
+        combined.set(right, 32)
+        next.push(this.hash256(combined))
+      }
+      level = next
+      idx = Math.floor(idx / 2)
+    }
+
+    return {
+      txid: targetTxid,
+      block_height: null, // caller sets this
+      merkle: proof,
+      pos,
+      txCount: txHashes.length,
+    }
+  }
+
   // Verify a block's merkle root matches its header
   verifyBlock(blockData) {
     const data = new Uint8Array(blockData)
