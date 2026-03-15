@@ -67,29 +67,38 @@ export default {
 
       // Try to load existing
       let walletData = null
-      if (btc.app && btc.app.storage) {
+      if (btc.app && btc.app.storage && !privateKey) {
         try {
           const fs = require('fs')
           const path = require('path')
           const walletFile = path.join(btc.app.storage.basePath, 'wallet', 'keys.json')
           if (fs.existsSync(walletFile)) {
             walletData = JSON.parse(fs.readFileSync(walletFile, 'utf8'))
-            mnemonic = walletData.mnemonic
+            if (walletData.mnemonic) mnemonic = walletData.mnemonic
+            if (walletData.hexKey) privateKey = hexToBytes(walletData.hexKey)
           }
         } catch {}
       }
 
-      // Generate new if none exists
+      // If we have a raw hex key (nostr-style), use it directly
+      if (privateKey && !mnemonic) {
+        const xOnlyPubkey = schnorr.getPublicKey(privateKey)
+        const hrp = chain === 'btc' ? 'bc' : 'tb'
+        const words = bech32m.toWords(xOnlyPubkey)
+        address = bech32m.encode(hrp, [1, ...words])
+        return { mnemonic: null, address, path: 'raw hex key' }
+      }
+
+      // Generate new mnemonic if none exists
       if (!mnemonic) {
         const { wordlist } = await import('https://esm.sh/@scure/bip39@1.5.4/wordlists/english')
         mnemonic = generateMnemonic(wordlist, 128) // 12 words
       }
 
-      // Derive taproot key
+      // Derive taproot key from mnemonic
       const seed = mnemonicToSeedSync(mnemonic)
       const root = HDKey.fromMasterSeed(seed)
 
-      // BIP86: m/86'/0'/0'/0/0 (mainnet) or m/86'/1'/0'/0/0 (testnet)
       const coinType = chain === 'btc' ? 0 : 1
       const path = `m/86'/${coinType}'/0'/0/0`
       const child = root.derive(path)
@@ -477,22 +486,28 @@ export default {
         const seedDetails = document.createElement('details')
         const seedSummary = document.createElement('summary')
         seedSummary.style.cssText = 'cursor:pointer;color:#f7931a;font-weight:600;font-size:1rem;'
-        seedSummary.textContent = 'Seed Phrase'
+        seedSummary.textContent = mnemonic ? 'Seed Phrase' : 'Private Key'
         seedDetails.appendChild(seedSummary)
 
         const warning = document.createElement('div')
         warning.className = 'wallet-warning'
-        warning.textContent = 'Never share your seed phrase. Anyone with these words can steal your funds.'
+        warning.textContent = mnemonic
+          ? 'Never share your seed phrase. Anyone with these words can steal your funds.'
+          : 'Never share your private key. Anyone with this key can steal your funds.'
         seedDetails.appendChild(warning)
 
         const mnemonicEl = document.createElement('div')
         mnemonicEl.className = 'wallet-mnemonic'
-        mnemonic.split(' ').forEach((word, i) => {
-          const span = document.createElement('span')
-          span.textContent = (i + 1) + '.' + word + '  '
-          span.style.color = '#555'
-          mnemonicEl.appendChild(span)
-        })
+        if (mnemonic) {
+          mnemonic.split(' ').forEach((word, i) => {
+            const span = document.createElement('span')
+            span.textContent = (i + 1) + '.' + word + '  '
+            span.style.color = '#555'
+            mnemonicEl.appendChild(span)
+          })
+        } else {
+          mnemonicEl.textContent = bytesToHex(privateKey)
+        }
         seedDetails.appendChild(mnemonicEl)
 
         seedCard.appendChild(seedDetails)
@@ -545,10 +560,89 @@ export default {
           if (confirm('This will replace your current wallet. Make sure you have backed up your seed phrase!')) {
             mnemonic = null
             address = null
+            privateKey = null
             await init()
           }
         })
         actionsCard.appendChild(newBtn)
+
+        // Restore wallet
+        const restoreCard = document.createElement('div')
+        restoreCard.className = 'wallet-card'
+        restoreCard.innerHTML = '<h3>Import Wallet</h3>'
+        const restoreInput = document.createElement('input')
+        restoreInput.type = 'text'
+        restoreInput.placeholder = '12-word seed phrase or 64-char hex key (Nostr compatible)'
+        restoreInput.style.cssText = 'width:100%;font-family:monospace;font-size:0.8rem;padding:0.5rem;border:1px solid #ddd;border-radius:4px;margin-bottom:0.5rem;'
+        restoreCard.appendChild(restoreInput)
+        const restoreStatus = document.createElement('div')
+        restoreStatus.style.cssText = 'font-size:0.8rem;margin-bottom:0.5rem;min-height:1.2em;'
+        restoreCard.appendChild(restoreStatus)
+        const restoreBtn = document.createElement('button')
+        restoreBtn.className = 'wallet-btn'
+        restoreBtn.textContent = 'Import'
+        restoreCard.appendChild(restoreBtn)
+        pane.appendChild(restoreCard)
+
+        restoreBtn.addEventListener('click', async () => {
+          const input = restoreInput.value.trim()
+          if (!input) { restoreStatus.textContent = 'Enter a seed phrase or hex key'; restoreStatus.style.color = '#c0392b'; return }
+
+          restoreBtn.disabled = true
+          restoreBtn.textContent = 'Importing...'
+          restoreStatus.textContent = ''
+
+          try {
+            let saveData = {}
+
+            if (/^[0-9a-fA-F]{64}$/.test(input)) {
+              // Hex private key
+              privateKey = hexToBytes(input)
+              mnemonic = null
+              address = null
+              saveData = { hexKey: input, chain, created: new Date().toISOString() }
+              restoreStatus.textContent = 'Hex key detected'
+              restoreStatus.style.color = '#2d8a4e'
+            } else {
+              const words = input.toLowerCase().split(/\s+/).filter(w => w.length > 0)
+              if (words.length === 12 || words.length === 24) {
+                mnemonic = words.join(' ')
+                privateKey = null
+                address = null
+                saveData = { mnemonic, chain, created: new Date().toISOString() }
+                restoreStatus.textContent = words.length + '-word seed detected'
+                restoreStatus.style.color = '#2d8a4e'
+              } else {
+                restoreStatus.textContent = 'Invalid: need 12/24 words or 64 hex chars'
+                restoreStatus.style.color = '#c0392b'
+                restoreBtn.disabled = false
+                restoreBtn.textContent = 'Import'
+                return
+              }
+            }
+
+            // Save to disk
+            try {
+              const fs = require('fs')
+              const path = require('path')
+              const walletDir = path.join(btc.app.storage.basePath, 'wallet')
+              fs.mkdirSync(walletDir, { recursive: true })
+              fs.writeFileSync(path.join(walletDir, 'keys.json'), JSON.stringify(saveData, null, 2))
+            } catch {}
+
+            restoreStatus.textContent = '\u2713 Wallet imported!'
+            restoreStatus.style.color = '#2d8a4e'
+
+            // Reinitialize
+            await new Promise(r => setTimeout(r, 500))
+            await init()
+          } catch (err) {
+            restoreStatus.textContent = 'Error: ' + err.message
+            restoreStatus.style.color = '#c0392b'
+            restoreBtn.disabled = false
+            restoreBtn.textContent = 'Import'
+          }
+        })
 
         const refreshBtn = document.createElement('button')
         refreshBtn.className = 'wallet-btn secondary'
