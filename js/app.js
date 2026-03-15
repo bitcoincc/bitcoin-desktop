@@ -43,8 +43,8 @@ export class BitcoinDesktop extends EventTarget {
       this.status = 'verifying'
       this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'verify', status: 'verifying' } }))
 
-      const result = await this.headers.verify((done, total) => {
-        if (onProgress) onProgress('verify', done, total)
+      const result = await this.headers.verify((done, total, extra) => {
+        if (onProgress) onProgress('verify', done, total, extra)
       })
 
       this.dispatchEvent(new CustomEvent('status', {
