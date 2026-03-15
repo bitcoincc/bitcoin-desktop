@@ -126,7 +126,8 @@ export class BlockFetcher extends EventTarget {
     if (!this.headers.headers || this.headers.height < 0) return
 
     const tipHeight = this.headers.height
-    const fromHeight = Math.max(0, tipHeight - count + 1)
+    const floor = this.blockFloor || 0
+    const fromHeight = Math.max(floor, tipHeight - count + 1)
 
     this.dispatchEvent(new CustomEvent('bootstrap', {
       detail: { from: fromHeight, to: tipHeight, count: tipHeight - fromHeight + 1 }

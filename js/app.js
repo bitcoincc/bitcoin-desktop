@@ -26,6 +26,7 @@ export class BitcoinDesktop extends EventTarget {
     this.blocks.retention = this.config.retention
     this.blocks.rateLimitMs = this.config.rateLimit
     this.blocks.sourceNames = this.config.sources
+    this.blocks.blockFloor = (this.config.blockFloor && this.config.blockFloor[chain]) || 0
     this.storage = new Storage(chain)
     this.uploader = new BlockUploader(chain)
     this.uploader.enabled = this.config.contributeBlocks || false

@@ -36,6 +36,13 @@ export const DEFAULTS = {
   // Rate limiting
   rateLimit: 5000,    // ms between block API requests
 
+  // Block range — don't fetch individual blocks before this height
+  // Older blocks served from blk.dat bundles (future)
+  blockFloor: {
+    btc: 878000,       // ~Jan 2026
+    tbtc4: 0,          // testnet4: fetch everything (small chain)
+  },
+
   // Bootstrap
   bootstrapBlocks: 12, // fetch last 12 blocks on startup (matches NIP-333 batch)
 
