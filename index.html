@@ -84,6 +84,8 @@
     <div id="result"></div>
     <table id="htfuTable" class="htfu-table"></table>
 
+    <div id="blockStatus" style="display:none;margin:1rem 0;padding:0.75rem 1rem;border:1px solid #eee;border-radius:4px;font-size:0.85rem;color:#666;"></div>
+
     <div class="verify-input" style="display:none" id="verifySection">
       <label style="font-size:0.75rem;color:#888;">txid:</label>
       <input type="text" id="txidInput" value="b5d750f75faefe571ede0f315a15fce8b34edfe456c94f8cc75e2868f502dd74" placeholder="Enter transaction ID to verify">
@@ -263,7 +265,7 @@
           p3.querySelector('.phase-badge').className = 'phase-badge badge-running'
         }
         if (d.phase === 'live') {
-          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
+          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString() + (d.score ? ' \u00b7 Score: ' + d.score + '/1000' : '')
         }
         if (d.phase === 'ready') {
           p3.querySelector('.phase-badge').textContent = '\u2713 Live'
@@ -300,6 +302,20 @@
 
       app.addEventListener('newblock', (e) => {
         p3.querySelector('.phase-detail').textContent = 'Tip: block ' + e.detail.height.toLocaleString()
+      })
+
+      const blockStatusEl = document.getElementById('blockStatus')
+
+      app.addEventListener('blockfetched', (e) => {
+        blockStatusEl.style.display = 'block'
+        const sizeMB = (e.detail.size / 1024 / 1024).toFixed(2)
+        blockStatusEl.textContent = '\u2713 Block ' + e.detail.height.toLocaleString() + ' fetched and verified (' + sizeMB + ' MB)'
+      })
+
+      app.addEventListener('blockerror', (e) => {
+        blockStatusEl.style.display = 'block'
+        blockStatusEl.textContent = '\u26A0 Block ' + e.detail.height.toLocaleString() + ': ' + e.detail.error
+        blockStatusEl.style.color = '#c0392b'
       })
 
       app.start((phase, done, total, extra) => {

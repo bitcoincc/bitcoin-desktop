@@ -7,26 +7,26 @@
 import { HeaderStore } from './headers.js'
 import { BlockFetcher } from './blocks.js'
 import { Storage } from './storage.js'
+import { DEFAULTS, mergeConfig, computeScore } from './config.js'
 
-const NOSTR_RELAYS = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.nostr.net',
-  'wss://relay.primal.net',
-]
 const NOSTR_KIND = 33333
 const NOSTR_PUBKEY = 'cccccccc829b802b7bf52d43edf7cfe62ac89f332a318b6826ac8bd6e73660da'
 
 export class BitcoinDesktop extends EventTarget {
-  constructor(chain = 'btc') {
+  constructor(chain = 'btc', userConfig = {}) {
     super()
     this.chain = chain
+    this.config = mergeConfig({ chain, ...userConfig })
     this.headers = new HeaderStore(chain)
     this.blocks = new BlockFetcher(this.headers, chain)
+    this.blocks.retention = this.config.retention
+    this.blocks.rateLimitMs = this.config.rateLimit
+    this.blocks.sources = this.config.sources
     this.storage = new Storage(chain)
     this.sockets = {}
     this.nostrTip = 0
     this.status = 'idle'
+    this.score = 0
   }
 
   async start(onProgress) {
@@ -93,7 +93,7 @@ export class BitcoinDesktop extends EventTarget {
       this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'nostr', status: 'connecting' } }))
 
       let connected = 0
-      for (const url of NOSTR_RELAYS) {
+      for (const url of this.config.relays) {
         const ws = new WebSocket(url)
         this.sockets[url] = ws
 
@@ -136,13 +136,30 @@ export class BitcoinDesktop extends EventTarget {
             }
 
             if (appended > 0) {
+              // Save updated headers
+              this.storage.saveHeaders(this.headers.headers).catch(() => {})
+              this.storage.saveVerified({
+                tipHash: this.headers.tipHash,
+                height: this.headers.height,
+              }).catch(() => {})
+
               this.dispatchEvent(new CustomEvent('newblock', {
                 detail: { height: this.headers.height, hash: this.headers.tipHash }
               }))
+
+              // Fetch full blocks if retention > 0
+              if (this.config.retention !== 0) {
+                this._fetchNewBlocks(startHeight + count - appended, this.headers.height)
+              }
             }
 
+            this.score = computeScore(this.config, {
+              synced: this.headers.height >= tipHeight - 1,
+              relaysConnected: connected > 0,
+            })
+
             this.dispatchEvent(new CustomEvent('status', {
-              detail: { phase: 'live', height: tipHeight, hash: this.headers.tipHash }
+              detail: { phase: 'live', height: tipHeight, hash: this.headers.tipHash, score: this.score }
             }))
           } catch (err) {
             console.error('Nostr parse error:', err)
@@ -179,6 +196,35 @@ export class BitcoinDesktop extends EventTarget {
   }
 
   // Verify a transaction by txid
+  // Fetch and store new blocks (called when new headers arrive)
+  async _fetchNewBlocks(fromHeight, toHeight) {
+    for (let h = fromHeight; h <= toHeight; h++) {
+      try {
+        const block = await this.blocks.fetchBlock(h)
+
+        // Save to local storage
+        await this.storage.saveBlock(h, block)
+
+        this.dispatchEvent(new CustomEvent('blockfetched', {
+          detail: { height: h, size: block.length }
+        }))
+
+        // Prune old blocks beyond retention
+        if (this.config.retention > 0) {
+          const pruneBelow = h - this.config.retention
+          if (pruneBelow >= 0) {
+            await this.storage.deleteBlock(pruneBelow)
+            this.blocks.cache.delete(pruneBelow)
+          }
+        }
+      } catch (err) {
+        this.dispatchEvent(new CustomEvent('blockerror', {
+          detail: { height: h, error: err.message }
+        }))
+      }
+    }
+  }
+
   // Fill gaps between cached headers and R2 tip
   async _fillGaps(onProgress) {
     const HEADER_SIZE = 80
