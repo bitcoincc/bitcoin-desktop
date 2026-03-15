@@ -254,7 +254,8 @@
           p3.querySelector('.bar-fill').style.background = '#2d8a4e'
 
           resultEl.className = 'result pass'
-          resultEl.textContent = '\u2713 Ready — verified chain, live connection'
+          const verifyElapsed = p2.querySelector('.phase-detail').textContent.match(/[\d.]+s/)?.[0] || ''
+          resultEl.textContent = '\u2713 All H-class consensus rules passed \u2014 ' + (app.headers.height + 1).toLocaleString() + ' headers, ' + verifyElapsed
 
           verifySection.style.display = 'flex'
           startBtn.textContent = 'Restart'
