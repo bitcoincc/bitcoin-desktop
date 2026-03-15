@@ -51,6 +51,32 @@
     .verify-input input { flex: 1; font-family: monospace; font-size: 0.8rem; padding: 0.4rem 0.6rem; border: 1px solid #ddd; border-radius: 4px; }
     .verify-input button { white-space: nowrap; }
     .tx-result { margin: 1rem 0; padding: 1rem; border: 1px solid #eee; border-radius: 4px; }
+    .settings { margin: 2rem 0; }
+    .settings-toggle { background: none; border: 1px solid #ddd; padding: 0.4rem 1rem; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.85rem; color: #666; }
+    .settings-toggle:hover { border-color: #f7931a; color: #f7931a; }
+    .settings-panel { display: none; margin-top: 1rem; padding: 1.5rem; border: 1px solid #eee; border-radius: 4px; }
+    .settings-panel.open { display: block; }
+    .setting-group { margin-bottom: 1.5rem; }
+    .setting-label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .recipes { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .recipe { padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 0.85rem; text-align: center; min-width: 80px; }
+    .recipe:hover { border-color: #f7931a; }
+    .recipe.active { background: #f7931a; color: #fff; border-color: #f7931a; }
+    .recipe-score { font-size: 0.7rem; color: #888; margin-top: 0.2rem; }
+    .recipe.active .recipe-score { color: rgba(255,255,255,0.8); }
+    .htfu-toggles { display: flex; gap: 0.5rem; margin: 0.75rem 0; }
+    .htfu-toggle { width: 44px; height: 44px; border-radius: 4px; border: 2px solid #ddd; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 1rem; cursor: pointer; }
+    .htfu-toggle.on { background: #2d8a4e; color: #fff; border-color: #2d8a4e; }
+    .htfu-toggle.locked { opacity: 0.5; cursor: not-allowed; }
+    .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.85rem; }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-value { color: #555; font-weight: 500; }
+    .retention-slider { width: 100%; margin: 0.5rem 0; }
+    .score-display { text-align: center; padding: 1rem; margin: 1rem 0; background: linear-gradient(135deg, #fdf6ec 0%, #fafaf8 100%); border: 1px solid #f7931a33; border-radius: 4px; }
+    .score-number { font-size: 2.5rem; font-weight: bold; color: #f7931a; }
+    .score-label { font-size: 0.8rem; color: #888; }
+    .score-bar { height: 8px; background: #eee; border-radius: 4px; margin-top: 0.5rem; overflow: hidden; }
+    .score-fill { height: 100%; background: linear-gradient(90deg, #f7931a, #2d8a4e); border-radius: 4px; transition: width 0.3s; }
     footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #ddd; color: #999; font-size: 0.85rem; }
     footer a { color: #888; text-decoration: none; }
   </style>
@@ -99,6 +125,56 @@
     </div>
     <div id="txResult"></div>
 
+    <div class="settings">
+      <button class="settings-toggle" id="settingsToggle">Settings</button>
+      <div class="settings-panel" id="settingsPanel">
+
+        <div class="score-display">
+          <div class="score-number" id="settingsScore">175</div>
+          <div class="score-label">Node Score</div>
+          <div class="score-bar"><div class="score-fill" id="settingsScoreFill" style="width: 17.5%"></div></div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Recipe</div>
+          <div class="recipes" id="recipeButtons"></div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Verification Level (HTFU)</div>
+          <div class="htfu-toggles" id="htfuToggles">
+            <div class="htfu-toggle on locked" data-level="h" title="Header-only (always on)">H</div>
+            <div class="htfu-toggle" data-level="t" title="Transaction validation">T</div>
+            <div class="htfu-toggle" data-level="f" title="Fraud proof checking">F</div>
+            <div class="htfu-toggle" data-level="u" title="UTXO validation">U</div>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Block Retention</div>
+          <div class="setting-row">
+            <span>Keep last</span>
+            <span><input type="number" id="retentionInput" value="12" min="0" max="100000" style="width:80px;padding:0.3rem 0.5rem;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:0.85rem;text-align:right;"> blocks</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Network</div>
+          <div class="setting-row">
+            <span>Contribute blocks to CDN</span>
+            <input type="checkbox" id="contributeToggle" checked>
+          </div>
+          <div class="setting-row">
+            <span>Block sources</span>
+            <span class="setting-value" id="sourcesValue">local, r2, p2p</span>
+          </div>
+        </div>
+
+        <button class="start-btn" id="applySettings" style="margin-top:1rem;width:100%;">Apply &amp; Restart</button>
+
+      </div>
+    </div>
+
     <footer>
       <a href="https://bitcoin.cc">bitcoin.cc</a> · <a href="https://github.com/bitcoincc/bitcoin-desktop">source</a> · v0.0.1
     </footer>
@@ -106,7 +182,7 @@
 
   <script type="module">
     import { BitcoinDesktop } from './js/app.js'
-    import { computeScore } from './js/config.js'
+    import { computeScore, RECIPES, DEFAULTS, mergeConfig } from './js/config.js'
 
     let chain = 'btc'
     let app = null
@@ -229,7 +305,7 @@
       phasesEl.appendChild(p3)
       phasesEl.appendChild(p4)
 
-      app = new BitcoinDesktop(chain)
+      app = new BitcoinDesktop(chain, currentConfig)
 
       app.addEventListener('status', (e) => {
         const d = e.detail
@@ -386,7 +462,7 @@
         blocksStored++
         blocksMB += e.detail.size / 1024 / 1024
         const sizeMB = (e.detail.size / 1024 / 1024).toFixed(2)
-        const target = app.config.bootstrapBlocks || 12
+        const target = app.config.retention || 12
 
         // Update phase 4 (Bootstrap Blocks) progress
         const pct = Math.min(100, (blocksStored / target * 100)).toFixed(0)
@@ -476,6 +552,125 @@
       verifyBtn.disabled = false
       verifyBtn.textContent = 'Verify'
     })
+
+    // ── Settings ──
+
+    const retentionSteps = [0, 12, 100, 2016, 4032, -1]
+    const retentionLabels = ['Headers only', '12 blocks', '100 blocks', '1 epoch (2016)', '2 epochs (4032)', 'Archive (all)']
+    let currentConfig = { ...DEFAULTS }
+
+    // Toggle panel
+    document.getElementById('settingsToggle').addEventListener('click', () => {
+      document.getElementById('settingsPanel').classList.toggle('open')
+    })
+
+    // Build recipe buttons
+    const recipeContainer = document.getElementById('recipeButtons')
+    for (const [key, recipe] of Object.entries(RECIPES)) {
+      const btn = document.createElement('div')
+      btn.className = 'recipe' + (key === 'phone' ? ' active' : '')
+      btn.dataset.recipe = key
+      btn.innerHTML = '<div>' + recipe.label + '</div><div class="recipe-score">' + recipe.score + '/1000</div>'
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.recipe').forEach(r => r.classList.remove('active'))
+        btn.classList.add('active')
+        applyRecipe(key)
+      })
+      recipeContainer.appendChild(btn)
+    }
+
+    function applyRecipe(key) {
+      const recipe = RECIPES[key]
+      currentConfig.htfu = { ...recipe.htfu }
+      currentConfig.retention = recipe.retention
+      currentConfig.contributeBlocks = recipe.contributeBlocks || false
+      updateSettingsUI()
+    }
+
+    // HTFU toggles
+    document.querySelectorAll('.htfu-toggle:not(.locked)').forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const level = toggle.dataset.level
+        currentConfig.htfu[level] = !currentConfig.htfu[level]
+        // If enabling U, enable T and F too
+        if (level === 'u' && currentConfig.htfu.u) { currentConfig.htfu.t = true; currentConfig.htfu.f = true }
+        if (level === 'f' && currentConfig.htfu.f) { currentConfig.htfu.t = true }
+        // If disabling T, disable F and U too
+        if (level === 't' && !currentConfig.htfu.t) { currentConfig.htfu.f = false; currentConfig.htfu.u = false }
+        if (level === 'f' && !currentConfig.htfu.f) { currentConfig.htfu.u = false }
+        document.querySelectorAll('.recipe').forEach(r => r.classList.remove('active'))
+        updateSettingsUI()
+      })
+    })
+
+    // Retention input
+    const retentionInput = document.getElementById('retentionInput')
+    retentionInput.addEventListener('change', () => {
+      currentConfig.retention = parseInt(retentionInput.value) || 0
+      document.querySelectorAll('.recipe').forEach(r => r.classList.remove('active'))
+      updateSettingsUI()
+    })
+
+    // Contribute toggle
+    document.getElementById('contributeToggle').addEventListener('change', (e) => {
+      currentConfig.contributeBlocks = e.target.checked
+      updateSettingsUI()
+    })
+
+    function updateSettingsUI() {
+      // HTFU toggles
+      document.querySelectorAll('.htfu-toggle:not(.locked)').forEach(toggle => {
+        const level = toggle.dataset.level
+        toggle.classList.toggle('on', currentConfig.htfu[level])
+      })
+
+      // Retention
+      retentionInput.value = currentConfig.retention
+
+      // Contribute
+      document.getElementById('contributeToggle').checked = currentConfig.contributeBlocks
+
+      // Sources
+      document.getElementById('sourcesValue').textContent = currentConfig.sources?.join(', ') || 'local, r2, p2p'
+
+      // Score
+      const score = computeScore(currentConfig, { synced: true, relaysConnected: true })
+      document.getElementById('settingsScore').textContent = score
+      document.getElementById('settingsScoreFill').style.width = (score / 10) + '%'
+    }
+
+    // Load saved config on startup
+    const { Storage: ConfigStore } = await import('./js/storage.js')
+    const configStorage = new ConfigStore('btc')
+    try {
+      await configStorage.init()
+      const saved = await configStorage.loadConfig()
+      if (saved) {
+        currentConfig = mergeConfig(saved)
+        for (const [key, recipe] of Object.entries(RECIPES)) {
+          if (recipe.retention === currentConfig.retention &&
+              JSON.stringify(recipe.htfu) === JSON.stringify(currentConfig.htfu)) {
+            document.querySelectorAll('.recipe').forEach(r => r.classList.remove('active'))
+            const btn = document.querySelector('[data-recipe="' + key + '"]')
+            if (btn) btn.classList.add('active')
+            break
+          }
+        }
+      }
+    } catch {}
+
+    // Apply button — save config and restart
+    document.getElementById('applySettings').addEventListener('click', async () => {
+      try {
+        await configStorage.saveConfig(currentConfig)
+        document.getElementById('settingsPanel').classList.remove('open')
+        startBtn.click()
+      } catch (err) {
+        console.error('Failed to save config:', err)
+      }
+    })
+
+    updateSettingsUI()
   </script>
 </body>
 </html>

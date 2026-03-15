@@ -193,7 +193,7 @@ class P2PConnection {
       const timeout = setTimeout(() => {
         this._resolve = null
         reject(new Error('Block request timeout'))
-      }, 30000)
+      }, 10000)
 
       this._resolve = (block) => {
         clearTimeout(timeout)

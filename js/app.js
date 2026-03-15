@@ -192,7 +192,7 @@ export class BitcoinDesktop extends EventTarget {
       }))
 
       // Phase 4: Bootstrap recent blocks in background (non-blocking)
-      const bootstrapCount = this.config.bootstrapBlocks || 12
+      const bootstrapCount = this.config.retention || 12
       if (this.config.retention > 0 && bootstrapCount > 0) {
         this.dispatchEvent(new CustomEvent('status', {
           detail: { phase: 'blocks', status: 'bootstrapping', count: bootstrapCount }
