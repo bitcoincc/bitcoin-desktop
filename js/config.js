@@ -27,9 +27,9 @@ export const DEFAULTS = {
   // Block sources (in priority order)
   sources: [
     'local',          // local cache first
-    'blockstream',    // blockstream.info API (conservative)
+    'p2p',            // Bitcoin P2P network (desktop only, no rate limits)
+    'blockstream',    // blockstream.info API (fallback)
     // 'r2',          // R2 CDN — enable when blocks are uploaded
-    // 'mempool',     // mempool.space API — backup
   ],
 
   // Rate limiting
