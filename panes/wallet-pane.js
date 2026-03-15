@@ -95,9 +95,8 @@ export default {
       const child = root.derive(path)
       privateKey = child.privateKey
 
-      // x-only pubkey (drop first byte)
-      const fullPubkey = schnorr.getPublicKey(privateKey)
-      const xOnlyPubkey = fullPubkey // schnorr.getPublicKey already returns x-only (32 bytes)
+      // x-only pubkey for P2TR address
+      const xOnlyPubkey = schnorr.getPublicKey(privateKey) // 32 bytes
 
       // Bech32m encode for P2TR
       const hrp = chain === 'btc' ? 'bc' : 'tb'
@@ -248,8 +247,9 @@ export default {
         script: createOutputScript(out.address),
       }))
 
-      // Sighash precomputed values
-      const prevoutScript = new Uint8Array([0x51, 0x20, ...tweakedPubKey])
+      // Sighash precomputed values — use the x-only pubkey that's in the address
+      const xOnlyPub = crypto.schnorr.getPublicKey(privateKey)
+      const prevoutScript = new Uint8Array([0x51, 0x20, ...xOnlyPub])
       const version = bigintToLE(2, 4)
       const locktime = bigintToLE(0, 4)
 
@@ -259,19 +259,27 @@ export default {
       const hashSequences = crypto.sha256(concat(...inputs.map(i => i.sequence)))
       const hashOutputs = crypto.sha256(concat(...outputsData.map(o => concat(o.value, new Uint8Array([o.script.length]), o.script))))
 
-      // Sign each input
-      const tweakedPriv = tweakPrivateKey(privateKey)
+      // Sign each input with the raw private key (address uses untweaked pubkey)
       const witnesses = []
       for (let i = 0; i < inputs.length; i++) {
         const sigMsg = concat(
-          new Uint8Array([0x00, 0x00]), // epoch, sighash type
+          new Uint8Array([0x00, 0x00]), // epoch, sighash type (DEFAULT)
           version, locktime,
           hashPrevouts, hashAmounts, hashScriptPubkeys, hashSequences, hashOutputs,
-          new Uint8Array([0x00]), // spend type
+          new Uint8Array([0x00]), // spend type (no annex, no script path)
           bigintToLE(i, 4), // input index
         )
         const sighash = taggedHash('TapSighash', sigMsg)
-        const sig = crypto.schnorr.sign(sighash, tweakedPriv)
+        // Sign with raw key — no tweak since address uses untweaked pubkey
+        let sigKey = new Uint8Array(privateKey)
+        // Negate if y is odd (BIP340 requirement)
+        const pub = crypto.secp256k1.getPublicKey(privateKey, true)
+        if (pub[0] === 0x03) {
+          const n = crypto.secp256k1.CURVE.n
+          const neg = n - BigInt('0x' + bytesToHex(privateKey))
+          sigKey = hexToBytes(neg.toString(16).padStart(64, '0'))
+        }
+        const sig = crypto.schnorr.sign(sighash, sigKey)
         witnesses.push(sig)
       }
 
@@ -286,14 +294,20 @@ export default {
       parts.push(locktime)
 
       const tx = concat(...parts)
+      console.log('[wallet] tx hex:', bytesToHex(tx))
+      console.log('[wallet] tx size:', tx.length, 'bytes')
+      console.log('[wallet] inputs:', selected.length, 'outputs:', outputsData.length)
+      console.log('[wallet] fee:', Number(fee), 'change:', Number(change))
       return { hex: bytesToHex(tx), fee: Number(fee), total: Number(totalInput), amount: amountSats }
     }
 
     async function broadcastTx(txHex) {
       const api = chain === 'btc' ? 'https://mempool.space/api' : 'https://mempool.space/testnet4/api'
       const res = await fetch(`${api}/tx`, { method: 'POST', body: txHex })
-      if (!res.ok) throw new Error(await res.text())
-      return res.text()
+      const text = await res.text()
+      console.log('[wallet] broadcast response:', res.status, text)
+      if (!res.ok) throw new Error(text)
+      return text
     }
 
     // Build UI
