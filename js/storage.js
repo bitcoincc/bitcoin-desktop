@@ -26,9 +26,9 @@ export class Storage {
 
   async init() {
     if (this.isNode) {
-      const os = require('os')
-      const path = require('path')
-      const fs = require('fs')
+      let os, path, fs
+      try { os = require('os'); path = require('path'); fs = require('fs') }
+      catch { os = await import('os'); path = await import('path'); fs = await import('fs') }
       this.fs = fs
       this.path = path
       this.basePath = path.join(os.homedir(), '.bitcoin-desktop', this.chain)
