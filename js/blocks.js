@@ -88,7 +88,7 @@ export class BlockFetcher extends EventTarget {
     for (const source of this.sources) {
       try {
         console.log('[blocks] trying', source.name, 'for block', height)
-        if (source.name !== 'local' && source.name !== 'p2p') await this.throttle()
+        if (source.name === 'blockstream' || source.name === 'mempool') await this.throttle()
         block = await source.fetchBlock(height, hash, this.chain)
         console.log('[blocks]', source.name, 'returned', block ? block.length + ' bytes' : 'null')
 
