@@ -21,7 +21,7 @@ export class BitcoinDesktop extends EventTarget {
     this.blocks = new BlockFetcher(this.headers, chain)
     this.blocks.retention = this.config.retention
     this.blocks.rateLimitMs = this.config.rateLimit
-    this.blocks.sources = this.config.sources
+    this.blocks.sourceNames = this.config.sources
     this.storage = new Storage(chain)
     this.sockets = {}
     this.nostrTip = 0
