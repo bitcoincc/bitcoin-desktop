@@ -99,7 +99,7 @@ export class BitcoinDesktop extends EventTarget {
 
         ws.onopen = () => {
           connected++
-          this.dispatchEvent(new CustomEvent('relay', { detail: { url, status: 'connected', count: connected, total: NOSTR_RELAYS.length } }))
+          this.dispatchEvent(new CustomEvent('relay', { detail: { url, status: 'connected', count: connected, total: this.config.relays.length } }))
           ws.send(JSON.stringify([
             'REQ', 'headers',
             { kinds: [NOSTR_KIND], authors: [NOSTR_PUBKEY], '#d': ['latest'], '#n': [this.chain], limit: 1 }
