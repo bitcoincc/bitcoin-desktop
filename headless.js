@@ -35,7 +35,8 @@ console.log(`Data: ${DATA_DIR}`)
 // Start JSS if configured
 if (config.serveBlocks) {
   const port = config.serverPort || 8443
-  const jssPath = join(import.meta.dirname, 'node_modules', '.bin', 'jss')
+  const __dirname = new URL('.', import.meta.url).pathname
+  const jssPath = join(__dirname, 'node_modules', '.bin', 'jss')
 
   const jss = spawn(jssPath, [
     'start', '--port', String(port), '--root', DATA_DIR, '--no-multiuser',
