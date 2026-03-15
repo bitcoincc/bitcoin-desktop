@@ -17,6 +17,62 @@ export class Scanner extends EventTarget {
     this.utxos = new Map()         // "txid:vout" → { address, value, height }
     this.history = []              // { txid, type, value, height, timestamp }
     this.lastMempoolCheck = new Map() // address → last known tx count
+    this.lastScannedHeight = 0
+    this.storage = null
+  }
+
+  // Set storage for persistence
+  setStorage(storage) {
+    this.storage = storage
+  }
+
+  // Save wallet state to disk
+  async save() {
+    if (!this.storage) return
+    try {
+      const data = {
+        utxos: Array.from(this.utxos.entries()).map(([key, val]) => ({ key, ...val })),
+        history: this.history.slice(-1000), // keep last 1000 events
+        lastScannedHeight: this.lastScannedHeight,
+        addresses: Array.from(this.addresses),
+        scripts: Array.from(this.scripts.entries()).map(([k, v]) => ({ script: k, address: v })),
+      }
+      const fs = await this._getFs()
+      const path = await this._getPath()
+      const dir = path.join(this.storage.basePath, 'wallet')
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'utxos.json'), JSON.stringify(data, null, 2))
+    } catch {}
+  }
+
+  // Load wallet state from disk
+  async load() {
+    if (!this.storage) return false
+    try {
+      const fs = await this._getFs()
+      const path = await this._getPath()
+      const file = path.join(this.storage.basePath, 'wallet', 'utxos.json')
+      if (!fs.existsSync(file)) return false
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+
+      this.utxos = new Map(data.utxos.map(u => [u.key, { address: u.address, value: u.value, height: u.height }]))
+      this.history = data.history || []
+      this.lastScannedHeight = data.lastScannedHeight || 0
+
+      for (const addr of (data.addresses || [])) this.addresses.add(addr)
+      for (const { script, address } of (data.scripts || [])) this.scripts.set(script, address)
+
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async _getFs() {
+    try { return require('fs') } catch { return await import('fs') }
+  }
+  async _getPath() {
+    try { return require('path') } catch { return await import('path') }
   }
 
   // Add an address to watch
@@ -70,8 +126,11 @@ export class Scanner extends EventTarget {
       }
     }
 
+    this.lastScannedHeight = blockHeight
+
     if (events.length > 0) {
       this.dispatchEvent(new CustomEvent('transactions', { detail: { events, height: blockHeight } }))
+      this.save() // persist on change
     }
 
     return events

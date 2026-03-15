@@ -132,7 +132,20 @@ export default {
       }
     }
 
+    function getLocalBalance() {
+      if (!btc.app || !btc.app.scanner) return null
+      const scanner = btc.app.scanner
+      if (scanner.utxos.size === 0 && scanner.lastScannedHeight === 0) return null
+      const confirmed = Number(scanner.getBalance())
+      return { confirmed, unconfirmed: 0, total: confirmed, local: true, lastScanned: scanner.lastScannedHeight }
+    }
+
     async function checkBalance() {
+      // Try local first
+      const local = getLocalBalance()
+      if (local && local.total > 0) return local
+
+      // Fallback to API
       if (!address) return null
       const api = chain === 'btc'
         ? 'https://mempool.space/api'
@@ -252,6 +265,11 @@ export default {
     }
 
     async function fetchUtxos() {
+      // Try local UTXOs first
+      if (btc.app && btc.app.scanner && btc.app.scanner.utxos.size > 0) {
+        return btc.app.scanner.getUtxos()
+      }
+      // Fallback to API
       const api = chain === 'btc' ? 'https://mempool.space/api' : 'https://mempool.space/testnet4/api'
       const res = await fetch(`${api}/address/${address}/utxo`)
       if (!res.ok) throw new Error('Failed to fetch UTXOs')
@@ -408,8 +426,10 @@ export default {
         const bal = await checkBalance()
         if (bal) {
           balanceEl.textContent = bal.total.toLocaleString()
-          if (bal.unconfirmed !== 0) {
+          if (bal.unconfirmed) {
             balanceLabel.textContent = 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)'
+          } else if (bal.local) {
+            balanceLabel.textContent = 'sats (verified locally, scanned to block ' + bal.lastScanned + ')'
           }
         } else {
           balanceEl.textContent = '0'

@@ -412,6 +412,8 @@ export class BitcoinDesktop extends EventTarget {
 
   // Register a wallet address for scanning
   watchAddress(address, scriptPubkeyHex) {
+    this.scanner.setStorage(this.storage)
+    this.scanner.load().catch(() => {})
     this.scanner.watch(address, scriptPubkeyHex)
 
     // Forward scanner events
