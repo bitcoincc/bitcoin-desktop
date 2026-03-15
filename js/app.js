@@ -41,7 +41,7 @@ export class BitcoinDesktop extends EventTarget {
       const cachedVerified = await this.storage.loadVerified()
 
       if (cached && cachedVerified) {
-        // Use cached headers — skip download
+        // Use cached headers
         this.headers.headers = cached
         this.headers.height = Math.floor(cached.length / 80) - 1
         this.headers.tipHash = cachedVerified.tipHash
@@ -51,23 +51,12 @@ export class BitcoinDesktop extends EventTarget {
           detail: { phase: 'download', status: 'cached', height: this.headers.height }
         }))
 
-        // Check if R2 has newer headers
+        // Try to fill gaps incrementally
         try {
-          const headRes = await fetch(this.headers.getSourceUrl(), { method: 'HEAD' })
-          const remoteSize = parseInt(headRes.headers.get('content-length') || '0')
-          const remoteHeight = Math.floor(remoteSize / 80) - 1
-
-          if (remoteHeight > this.headers.height) {
-            this.dispatchEvent(new CustomEvent('status', {
-              detail: { phase: 'download', status: 'updating', height: this.headers.height, remoteHeight }
-            }))
-            await this.headers.download((received, total) => {
-              if (onProgress) onProgress('download', received, total)
-            })
-          }
+          await this._fillGaps(onProgress)
         } catch { /* offline is fine, use cached */ }
       } else {
-        // Fresh download
+        // Fresh download — full all.bin
         await this.headers.download((received, total) => {
           if (onProgress) onProgress('download', received, total)
         })
@@ -190,6 +179,140 @@ export class BitcoinDesktop extends EventTarget {
   }
 
   // Verify a transaction by txid
+  // Fill gaps between cached headers and R2 tip
+  async _fillGaps(onProgress) {
+    const HEADER_SIZE = 80
+    const EPOCH_SIZE = 2016
+    const R2_BASE = 'https://pub-a5a92731dd0d452b9670be07e5354fd6.r2.dev'
+    const cachedHeight = this.headers.height
+    const cachedEpoch = Math.floor(cachedHeight / EPOCH_SIZE)
+
+    // First try current.bin — covers gaps within current epoch
+    const currentUrl = `${R2_BASE}/${this.chain}/current.bin`
+    const currentRes = await fetch(currentUrl)
+
+    if (!currentRes.ok) return // R2 unavailable
+
+    const currentData = new Uint8Array(await currentRes.arrayBuffer())
+    const currentCount = currentData.length / HEADER_SIZE
+
+    // Figure out what epoch current.bin represents
+    // current.bin starts at some epoch boundary
+    // We need to find which headers in it are new to us
+    await this.headers.initHasher()
+
+    // Check if first header of current.bin links somewhere in our chain
+    const firstPrevHash = this.headers.toHex(this.headers.getPrevHash(currentData.subarray(0, HEADER_SIZE)))
+
+    // Find which height this links to by checking the hash of our cached tip going backwards
+    let linkHeight = -1
+    for (let h = cachedHeight; h >= Math.max(0, cachedHeight - EPOCH_SIZE); h--) {
+      const header = this.headers.getHeader(h)
+      if (this.headers.headerHash(header) === firstPrevHash) {
+        linkHeight = h
+        break
+      }
+    }
+
+    if (linkHeight >= 0) {
+      // current.bin starts at linkHeight + 1
+      // We need headers after our cache tip
+      const currentStartHeight = linkHeight + 1
+      const newStartIndex = cachedHeight - currentStartHeight + 1
+
+      if (newStartIndex >= 0 && newStartIndex < currentCount) {
+        const newHeaders = currentData.subarray(newStartIndex * HEADER_SIZE)
+        const newCount = newHeaders.length / HEADER_SIZE
+
+        if (newCount > 0) {
+          this.dispatchEvent(new CustomEvent('status', {
+            detail: { phase: 'download', status: 'updating', height: cachedHeight, remoteHeight: cachedHeight + newCount }
+          }))
+
+          // Verify and append
+          for (let i = 0; i < newCount; i++) {
+            const hex = Array.from(newHeaders.subarray(i * HEADER_SIZE, (i + 1) * HEADER_SIZE))
+              .map(b => b.toString(16).padStart(2, '0')).join('')
+            try {
+              this.headers.appendHeader(hex)
+            } catch {
+              break // chain break, stop
+            }
+          }
+          return // filled from current.bin
+        }
+      }
+    }
+
+    // Gap is bigger than current epoch — need epoch files
+    // Check what R2 has by fetching all.bin size
+    const headRes = await fetch(`${R2_BASE}/${this.chain}/all.bin`, { method: 'HEAD' })
+    if (!headRes.ok) return
+
+    const remoteSize = parseInt(headRes.headers.get('content-length') || '0')
+    const remoteHeight = Math.floor(remoteSize / HEADER_SIZE) - 1
+
+    if (remoteHeight <= cachedHeight) return // nothing new
+
+    const gapBlocks = remoteHeight - cachedHeight
+
+    if (gapBlocks > EPOCH_SIZE * 10) {
+      // Gap too large — just re-download all.bin
+      this.dispatchEvent(new CustomEvent('status', {
+        detail: { phase: 'download', status: 'updating', height: cachedHeight, remoteHeight }
+      }))
+      await this.headers.download((received, total) => {
+        if (onProgress) onProgress('download', received, total)
+      })
+      return
+    }
+
+    // Fetch missing epoch files
+    const startEpoch = cachedEpoch + 1
+    const endEpoch = Math.floor(remoteHeight / EPOCH_SIZE)
+
+    this.dispatchEvent(new CustomEvent('status', {
+      detail: { phase: 'download', status: 'updating', height: cachedHeight, remoteHeight }
+    }))
+
+    for (let e = startEpoch; e < endEpoch; e++) {
+      const epochUrl = `${R2_BASE}/${this.chain}/epoch/${e}.bin`
+      const epochRes = await fetch(epochUrl)
+      if (!epochRes.ok) break
+
+      const epochData = new Uint8Array(await epochRes.arrayBuffer())
+      const epochCount = epochData.length / HEADER_SIZE
+
+      for (let i = 0; i < epochCount; i++) {
+        const hex = Array.from(epochData.subarray(i * HEADER_SIZE, (i + 1) * HEADER_SIZE))
+          .map(b => b.toString(16).padStart(2, '0')).join('')
+        try {
+          this.headers.appendHeader(hex)
+        } catch {
+          break
+        }
+      }
+    }
+
+    // Finally fetch current.bin again for the remainder
+    const currentRes2 = await fetch(currentUrl)
+    if (currentRes2.ok) {
+      const currentData2 = new Uint8Array(await currentRes2.arrayBuffer())
+      const currentCount2 = currentData2.length / HEADER_SIZE
+      for (let i = 0; i < currentCount2; i++) {
+        const height = Math.floor(this.headers.height / EPOCH_SIZE) * EPOCH_SIZE + i
+        if (height <= this.headers.height) continue
+        const hex = Array.from(currentData2.subarray(i * HEADER_SIZE, (i + 1) * HEADER_SIZE))
+          .map(b => b.toString(16).padStart(2, '0')).join('')
+        try {
+          this.headers.appendHeader(hex)
+        } catch {
+          break
+        }
+      }
+    }
+  }
+
   async verifyTransaction(txid) {
     const API = this.chain === 'btc'
       ? 'https://mempool.space/api'
