@@ -91,19 +91,7 @@ export class BitcoinDesktop extends EventTarget {
         }))
       }
 
-      // Phase 3: Bootstrap recent blocks (just 1 by default, rest arrive via Nostr)
-      const bootstrapCount = this.config.bootstrapBlocks || 1
-      if (this.config.retention > 0 && bootstrapCount > 0) {
-        this.dispatchEvent(new CustomEvent('status', {
-          detail: { phase: 'blocks', status: 'bootstrapping', count: bootstrapCount }
-        }))
-        await this.blocks.bootstrap(bootstrapCount)
-        this.dispatchEvent(new CustomEvent('status', {
-          detail: { phase: 'blocks', status: 'done', cached: this.blocks.cache.size, totalSize: this.blocks.getTotalSize() }
-        }))
-      }
-
-      // Phase 4: Connect to Nostr for live headers (NIP-333)
+      // Phase 3: Connect to Nostr for live headers (NIP-333)
       this.dispatchEvent(new CustomEvent('status', { detail: { phase: 'nostr', status: 'connecting' } }))
 
       let connected = 0
@@ -199,6 +187,19 @@ export class BitcoinDesktop extends EventTarget {
       this.dispatchEvent(new CustomEvent('status', {
         detail: { phase: 'ready', height: this.headers.height, tipHash: this.headers.tipHash }
       }))
+
+      // Phase 4: Bootstrap recent blocks in background (non-blocking)
+      const bootstrapCount = this.config.bootstrapBlocks || 12
+      if (this.config.retention > 0 && bootstrapCount > 0) {
+        this.dispatchEvent(new CustomEvent('status', {
+          detail: { phase: 'blocks', status: 'bootstrapping', count: bootstrapCount }
+        }))
+        this.blocks.bootstrap(bootstrapCount).then(() => {
+          this.dispatchEvent(new CustomEvent('status', {
+            detail: { phase: 'blocks', status: 'done', cached: this.blocks.cache.size, totalSize: this.blocks.getTotalSize() }
+          }))
+        }).catch(() => {})
+      }
 
     } catch (err) {
       this.status = 'error'

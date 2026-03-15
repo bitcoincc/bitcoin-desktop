@@ -222,8 +222,8 @@
 
       const p1 = createPhase('1. Download Headers')
       const p2 = createPhase('2. Verify Chain')
-      const p3 = createPhase('3. Bootstrap Blocks')
-      const p4 = createPhase('4. Nostr Live (NIP-333)')
+      const p3 = createPhase('3. Nostr Live (NIP-333)')
+      const p4 = createPhase('4. Bootstrap Blocks')
       phasesEl.appendChild(p1)
       phasesEl.appendChild(p2)
       phasesEl.appendChild(p3)
@@ -269,31 +269,31 @@
           // Build HTFU results table (only if full rules available)
           if (d.rules) buildHTFUTable(d.rules, d.elapsed)
         }
-        if (d.phase === 'blocks' && d.status === 'bootstrapping') {
-          p3.querySelector('.phase-badge').textContent = 'Fetching...'
+        if (d.phase === 'nostr' && d.status === 'connecting') {
+          p3.querySelector('.phase-badge').textContent = 'Connecting...'
           p3.querySelector('.phase-badge').className = 'phase-badge badge-running'
-          p3.querySelector('.phase-detail').textContent = 'Fetching last ' + d.count + ' blocks...'
+        }
+        if (d.phase === 'live') {
+          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
+          if (d.score) nodeScore.textContent = 'Score: ' + d.score + ' / 1000'
+        }
+        if (d.phase === 'blocks' && d.status === 'bootstrapping') {
+          p4.querySelector('.phase-badge').textContent = '0/' + d.count
+          p4.querySelector('.phase-badge').className = 'phase-badge badge-running'
+          p4.querySelector('.phase-detail').textContent = 'Fetching last ' + d.count + ' blocks via P2P...'
         }
         if (d.phase === 'blocks' && d.status === 'done') {
           const sizeMB = (d.totalSize / 1024 / 1024).toFixed(1)
-          p3.querySelector('.phase-badge').textContent = '\u2713 Done'
-          p3.querySelector('.phase-badge').className = 'phase-badge badge-done'
-          p3.querySelector('.phase-detail').textContent = d.cached + ' blocks cached (' + sizeMB + ' MB)'
-          p3.querySelector('.bar-fill').style.width = '100%'
-          p3.querySelector('.bar-fill').style.background = '#2d8a4e'
-        }
-        if (d.phase === 'nostr' && d.status === 'connecting') {
-          p4.querySelector('.phase-badge').textContent = 'Connecting...'
-          p4.querySelector('.phase-badge').className = 'phase-badge badge-running'
-        }
-        if (d.phase === 'live') {
-          p4.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
-          if (d.score) nodeScore.textContent = 'Score: ' + d.score + ' / 1000'
+          p4.querySelector('.phase-badge').textContent = '\u2713 ' + d.cached + ' blocks'
+          p4.querySelector('.phase-badge').className = 'phase-badge badge-done'
+          p4.querySelector('.phase-detail').textContent = d.cached + ' blocks cached (' + sizeMB + ' MB)'
+          p4.querySelector('.bar-fill').style.width = '100%'
+          p4.querySelector('.bar-fill').style.background = '#2d8a4e'
         }
         if (d.phase === 'ready') {
           p3.querySelector('.phase-badge').textContent = '\u2713 Live'
           p3.querySelector('.phase-badge').className = 'phase-badge badge-done'
-          p4.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
+          p3.querySelector('.phase-detail').textContent = 'Tip: block ' + d.height.toLocaleString()
           p3.querySelector('.bar-fill').style.width = '100%'
           p3.querySelector('.bar-fill').style.background = '#2d8a4e'
 
@@ -324,13 +324,16 @@
       })
 
       app.addEventListener('relay', (e) => {
+        relayCount = e.detail.count
+        relayTotal = e.detail.total
         p3.querySelector('.phase-detail').textContent = e.detail.count + '/' + e.detail.total + ' relays connected'
         if (e.detail.count > 0) {
-          p4.querySelector('.phase-badge').textContent = '\u2713 Live'
-          p4.querySelector('.phase-badge').className = 'phase-badge badge-done'
-          p4.querySelector('.bar-fill').style.width = '100%'
-          p4.querySelector('.bar-fill').style.background = '#2d8a4e'
+          p3.querySelector('.phase-badge').textContent = '\u2713 Live'
+          p3.querySelector('.phase-badge').className = 'phase-badge badge-done'
+          p3.querySelector('.bar-fill').style.width = '100%'
+          p3.querySelector('.bar-fill').style.background = '#2d8a4e'
         }
+        if (nodeStatusEl.style.display !== 'none') updateNodeStatus()
       })
 
       app.addEventListener('newblock', (e) => {
@@ -372,28 +375,31 @@
         if (nodeStatusEl.style.display !== 'none') updateNodeStatus()
       })
 
-      app.addEventListener('blockfetched', (e) => {
+      app.blocks.addEventListener('fetched', (e) => {
         lastBlockTime = Date.now()
         blocksStored++
         blocksMB += e.detail.size / 1024 / 1024
         const sizeMB = (e.detail.size / 1024 / 1024).toFixed(2)
+        const target = app.config.bootstrapBlocks || 12
 
-        // Update phase 3 progress during bootstrap
-        const pct = Math.min(100, (blocksStored / app.config.retention * 100)).toFixed(0)
-        p3.querySelector('.phase-detail').textContent = blocksStored + '/' + app.config.retention + ' blocks (' + blocksMB.toFixed(1) + ' MB)'
-        p3.querySelector('.bar-fill').style.width = pct + '%'
+        // Update phase 4 (Bootstrap Blocks) progress
+        const pct = Math.min(100, (blocksStored / target * 100)).toFixed(0)
+        p4.querySelector('.phase-badge').textContent = blocksStored + '/' + target
+        p4.querySelector('.phase-badge').className = 'phase-badge badge-running'
+        p4.querySelector('.phase-detail').textContent = blocksStored + '/' + target + ' blocks (' + blocksMB.toFixed(1) + ' MB) via ' + (e.detail.source || 'unknown')
+        p4.querySelector('.bar-fill').style.width = pct + '%'
 
+        // Update node status bar
         nodeActivity.textContent = '\u2713 Block ' + e.detail.height.toLocaleString() + ' verified (' + sizeMB + ' MB) via ' + (e.detail.source || 'cache')
         nodeActivity.style.color = '#2d8a4e'
         updateNodeStatus()
-        // Reset to waiting after 10 seconds
         setTimeout(() => {
           nodeActivity.textContent = '\u26CF Waiting for next block...'
           nodeActivity.style.color = '#2c2c2c'
         }, 10000)
       })
 
-      app.addEventListener('blockerror', (e) => {
+      app.blocks.addEventListener('error', (e) => {
         nodeActivity.textContent = '\u26A0 Block ' + e.detail.height.toLocaleString() + ': ' + e.detail.error
         nodeActivity.style.color = '#b8860b'
         updateNodeStatus()

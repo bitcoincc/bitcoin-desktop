@@ -5,7 +5,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --no-sandbox",
+    "start": "electron . --no-sandbox --disable-gpu",
     "dev": "electron . --dev",
     "web": "npx serve ."
   },

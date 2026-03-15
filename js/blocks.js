@@ -32,7 +32,7 @@ export class BlockFetcher extends EventTarget {
     this.rateLimitMs = 200
     this.lastRequest = 0
     this.sourceNames = ['r2', 'blockstream']  // configurable order
-    this.isBrowser = typeof window !== 'undefined'
+    this.isBrowser = !(typeof process !== 'undefined' && process.versions && process.versions.node)
   }
 
   // Get active source modules (filtered by environment)
@@ -88,7 +88,7 @@ export class BlockFetcher extends EventTarget {
     for (const source of this.sources) {
       try {
         console.log('[blocks] trying', source.name, 'for block', height)
-        if (source.name !== 'local') await this.throttle()
+        if (source.name !== 'local' && source.name !== 'p2p') await this.throttle()
         block = await source.fetchBlock(height, hash, this.chain)
         console.log('[blocks]', source.name, 'returned', block ? block.length + ' bytes' : 'null')
 
@@ -138,6 +138,8 @@ export class BlockFetcher extends EventTarget {
     for (let h = fromHeight; h <= tipHeight; h++) {
       try {
         await this.fetchBlock(h)
+        // Yield to UI so progress renders
+        await new Promise(r => setTimeout(r, 0))
       } catch (err) {
         this.dispatchEvent(new CustomEvent('error', {
           detail: { height: h, source: 'bootstrap', error: err.message }

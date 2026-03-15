@@ -28,7 +28,7 @@ export const DEFAULTS = {
   sources: [
     'local',          // local cache first
     'p2p',            // Bitcoin P2P network (desktop only, no rate limits)
-    'blockstream',    // blockstream.info API (fallback)
+    // 'blockstream', // blockstream.info API (enable as fallback)
     // 'r2',          // R2 CDN — enable when blocks are uploaded
   ],
 
@@ -36,8 +36,7 @@ export const DEFAULTS = {
   rateLimit: 5000,    // ms between block API requests
 
   // Bootstrap
-  bootstrapBlocks: 1, // fetch only 1 block on startup to prove it works
-                      // rest accumulate naturally via Nostr (~1 every 10 min)
+  bootstrapBlocks: 12, // fetch last 12 blocks on startup (matches NIP-333 batch)
 
   // R2 contribution
   contributeBlocks: false,  // upload verified blocks to R2
