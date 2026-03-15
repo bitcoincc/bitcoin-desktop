@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron . --no-sandbox --disable-gpu",
     "test": "node --test test/*.test.js",
+    "headless": "node headless.js",
     "dev": "electron . --dev",
     "web": "npx serve ."
   },
