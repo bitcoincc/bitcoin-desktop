@@ -342,6 +342,18 @@ export default {
 
         pane.appendChild(balanceCard)
 
+        // Transaction history
+        const historyCard = document.createElement('div')
+        historyCard.className = 'wallet-card'
+        historyCard.innerHTML = '<h3>Activity</h3>'
+        const historyEl = document.createElement('div')
+        const historyEmpty = document.createElement('div')
+        historyEmpty.className = 'wallet-info'
+        historyEmpty.textContent = 'Watching for transactions...'
+        historyEl.appendChild(historyEmpty)
+        historyCard.appendChild(historyEl)
+        pane.appendChild(historyCard)
+
         // Check balance
         const bal = await checkBalance()
         if (bal) {
@@ -489,6 +501,38 @@ export default {
         // Save wallet
         await saveWallet()
 
+        // Register address for scanning
+        if (btc.app) {
+          const xPub = crypto.schnorr.getPublicKey(privateKey)
+          const scriptPubkey = bytesToHex(new Uint8Array([0x51, 0x20, ...xPub]))
+          btc.app.watchAddress(address, scriptPubkey)
+
+          // Listen for wallet events
+          btc.app.addEventListener('wallet-tx', (e) => {
+            for (const evt of e.detail.events) {
+              const sign = evt.type === 'receive' ? '+' : '-'
+              const line = document.createElement('div')
+              line.style.cssText = 'font-size:0.85rem;padding:0.5rem 0;border-bottom:1px solid #eee;'
+              line.innerHTML = '<span style="color:' + (evt.type === 'receive' ? '#2d8a4e' : '#c0392b') + ';font-weight:600;">' + sign + evt.value.toLocaleString() + ' sats</span> <span style="color:#888;">block ' + evt.height + '</span>'
+              historyEl.prepend(line)
+            }
+            // Refresh balance
+            checkBalance().then(bal => {
+              if (bal) {
+                balanceEl.textContent = bal.total.toLocaleString()
+                balanceLabel.textContent = bal.unconfirmed ? 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)' : 'sats'
+              }
+            })
+          })
+
+          btc.app.addEventListener('wallet-mempool', (e) => {
+            const bal = e.detail.balance
+            balanceEl.textContent = (bal.confirmed + bal.unconfirmed).toLocaleString()
+            balanceEl.style.color = '#f7931a'
+            balanceLabel.textContent = bal.unconfirmed ? 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)' : 'sats'
+          })
+        }
+
         // Actions
         const actionsCard = document.createElement('div')
         actionsCard.className = 'wallet-card'
@@ -515,7 +559,10 @@ export default {
           if (bal) {
             balanceEl.textContent = bal.total.toLocaleString()
             balanceEl.style.color = '#f7931a'
+            balanceLabel.textContent = bal.unconfirmed ? 'sats (' + bal.unconfirmed.toLocaleString() + ' unconfirmed)' : 'sats'
           }
+          // Also check mempool via scanner
+          if (btc.app) btc.app.scanner.checkMempool().catch(() => {})
         })
         actionsCard.appendChild(refreshBtn)
 

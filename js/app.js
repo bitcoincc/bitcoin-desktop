@@ -9,6 +9,7 @@ import { BlockFetcher } from './blocks.js'
 import { Storage } from './storage.js'
 import { DEFAULTS, mergeConfig, computeScore } from './config.js'
 import { BlockUploader } from './uploader.js'
+import { Scanner } from './scanner.js'
 import localSource from './sources/local.js'
 
 const NOSTR_KIND = 33333
@@ -27,6 +28,7 @@ export class BitcoinDesktop extends EventTarget {
     this.storage = new Storage(chain)
     this.uploader = new BlockUploader(chain)
     this.uploader.enabled = this.config.contributeBlocks || false
+    this.scanner = new Scanner(chain)
     this.sockets = {}
     this.nostrTip = 0
     this.status = 'idle'
@@ -230,6 +232,9 @@ export class BitcoinDesktop extends EventTarget {
           detail: { height: h, size: block.length }
         }))
 
+        // Scan block for wallet transactions
+        this.scanBlock(h, block)
+
         // Prune old blocks beyond retention
         if (this.config.retention > 0) {
           const pruneBelow = h - this.config.retention
@@ -378,6 +383,28 @@ export class BitcoinDesktop extends EventTarget {
         }
       }
     }
+  }
+
+  // Register a wallet address for scanning
+  watchAddress(address, scriptPubkeyHex) {
+    this.scanner.watch(address, scriptPubkeyHex)
+
+    // Forward scanner events
+    this.scanner.addEventListener('transactions', (e) => {
+      this.dispatchEvent(new CustomEvent('wallet-tx', { detail: e.detail }))
+    })
+    this.scanner.addEventListener('mempool', (e) => {
+      this.dispatchEvent(new CustomEvent('wallet-mempool', { detail: e.detail }))
+    })
+  }
+
+  // Scan a fetched block for wallet transactions
+  scanBlock(height, blockData) {
+    if (this.scanner.addresses.size === 0) return
+    const header = this.headers.getHeader(height)
+    if (!header) return
+    const timestamp = new DataView(header.buffer, header.byteOffset).getUint32(68, true)
+    return this.scanner.scanBlock(blockData, height, timestamp)
   }
 
   async verifyTransaction(txid) {
